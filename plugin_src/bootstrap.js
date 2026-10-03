@@ -38,6 +38,10 @@ async function startup({ rootURI }, reason) {
       { target: ctx, ignoreCache: true }
     );
     Services.scriptloader.loadSubScriptWithOptions(
+      `${rootURI}chrome/content/scripts/vendor/katex.min.js`,
+      { target: ctx, ignoreCache: true }
+    );
+    Services.scriptloader.loadSubScriptWithOptions(
       `${rootURI}chrome/content/scripts/markdown_renderer.js`,
       { target: ctx, ignoreCache: true }
     );
@@ -47,6 +51,10 @@ async function startup({ rootURI }, reason) {
     );
     Services.scriptloader.loadSubScriptWithOptions(
       `${rootURI}chrome/content/scripts/usage_tracker.js`,
+      { target: ctx, ignoreCache: true }
+    );
+    Services.scriptloader.loadSubScriptWithOptions(
+      `${rootURI}chrome/content/scripts/task_checkpoints.js`,
       { target: ctx, ignoreCache: true }
     );
     Services.scriptloader.loadSubScriptWithOptions(

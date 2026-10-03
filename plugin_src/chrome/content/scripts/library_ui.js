@@ -4,8 +4,15 @@
     const app = Zotero.MinerUAI, $ = id => document.getElementById('library-' + id);
     const el = (tag, className, text) => { const n = document.createElementNS('http://www.w3.org/1999/xhtml', tag); if (className) n.className = className; if (text != null) n.textContent = text; return n; };
     const labels = { metadata:'元数据', abstract:'摘要', annotation:'高亮原文', comment:'用户批注', aiComment:'AI 高亮分类', note:'用户笔记', aiNote:'AI 笔记' };
-    let thinking = false;
-    $('thinking').addEventListener('click', () => { thinking = !thinking; $('thinking').textContent = thinking ? '思考：开启' : '思考：关闭'; $('thinking').setAttribute('aria-pressed', String(thinking)); });
+    const settings = app.getTaskSettings?.('library') || { thinking: false, maxTokens: 8192 };
+    let thinking = settings.thinking === true;
+    const paintThinking = () => { $('thinking').textContent = thinking ? '思考：开启' : '思考：关闭'; $('thinking').setAttribute('aria-pressed', String(thinking)); };
+    paintThinking();
+    $('limit').value = String(settings.maxTokens || 8192);
+    if (!$('limit').value) $('limit').value = '8192';
+    const saveSettings = () => app.saveTaskSettings?.('library', { thinking, maxTokens: Number($('limit').value) });
+    $('thinking').addEventListener('click', () => { thinking = !thinking; paintThinking(); saveSettings(); });
+    $('limit').addEventListener('change', saveSettings);
     let busy = false, jobID = null, options = null, selected = [], history = [], contextKey = '';
     const api = async (action, payload = {}, onEvent) => {
       const response = JSON.parse(await app.libraryCall(action, JSON.stringify(payload), onEvent));
@@ -104,7 +111,12 @@
         if (result.invalidCitations) article.append(el('p', 'muted', '模型返回了无效来源编号，已标注“来源未核实”。'));
         const save = el('button', '', result.incomplete ? '保存未完成结果' : '保存为笔记'); article.append(save);
         save.addEventListener('click', async () => { save.disabled = true; try { await api('save', { resultID: result.id }); save.textContent = '已保存到图书馆'; } catch (error) { save.disabled = false; $('status').textContent = errorText(error); } });
-        if (action !== 'stats') { history.push({ question, titles: [...new Set(result.sources.map(s => s.title))] }); history = history.slice(-2); }
+        if (action !== 'stats') {
+          const cited = new Set([...result.markdown.matchAll(/\[(S\d+)\]/g)].map(m => m[1]));
+          const priorSources = [...result.sources.filter(s => cited.has(s.ref)), ...result.sources.filter(s => !cited.has(s.ref))];
+          history.push({ question, scopeKey: nextKey, summary: result.markdown.replace(/\[(?:S\d+|来源未核实)\]/g, '').slice(0, 1600), sources: priorSources.slice(0, 30).map(s => ({ sourceID: s.sourceID, itemID: s.itemID, uid: s.uid })) });
+          history = history.slice(-2);
+        }
         $('status').textContent = result.incomplete ? '未完成：输出触及上限，部分结果已保留，可保存为笔记。未自动续写。' : '已完成。来源编号和来源列表均可点击定位。';
       } catch (error) {
         const message = errorText(error);

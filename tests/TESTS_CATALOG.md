@@ -24,6 +24,16 @@
 
 ---
 
+## 新增行为回归
+
+- `math_rendering.js`：真实 KaTeX、四类公式分隔符、代码隔离、原生笔记和 XML 文档导入。
+- `reader_protection.js`：清空后另建笔记、并发保存、迟到回答取消和阅读器设置重开。
+- `task_settings.js`：全局思考、各任务 Token 上限及工作台任务类型保存。
+- `task_resume.js`：跨运行时检查点恢复、参数变化失效和 LLM/MinerU 取消。
+- `task_integration.js`：总结笔记去重、批处理重启恢复和高亮取消回滚。
+
+浏览器测试使用 Playwright；安装依赖后运行 `npx playwright install chromium`，也可设置 `CHROME_PATH` 使用系统 Chrome。
+
 ## 运行方式
 
 测试套件基于 Node.js 原生 `node:assert/strict` 与 `node:vm` 沙箱执行，无需额外安装重型依赖：

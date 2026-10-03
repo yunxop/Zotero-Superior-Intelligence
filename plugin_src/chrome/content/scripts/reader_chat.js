@@ -9,6 +9,7 @@ var ReaderChat = {
   toolbarHandler: null,
   sessions: new Map(),
   textCache: new Map(),
+  views: new Map(),
 
   register() {
     Zotero.ftl.addResourceIds(["mineru.ftl"]);
@@ -26,7 +27,8 @@ var ReaderChat = {
       onItemChange: ({ tabType, setEnabled }) => {
         setEnabled(tabType === "reader");
       },
-      onRender: ({ doc, body }) => this.render(doc, body)
+      onRender: ({ doc, body }) => this.render(doc, body),
+      onDestroy: ({ body }) => this.releaseView(body)
     });
     if (!this.paneID) throw new Error("无法注册 PDF 阅读器 AI 侧边栏");
     this.toolbarHandler = ({ reader, doc, append }) => {
@@ -51,8 +53,10 @@ var ReaderChat = {
       this.paneID = null;
     }
     Zotero.ftl.removeResourceIds(["mineru.ftl"]);
+    for (const state of this.sessions.values()) state.controller?.abort();
     this.sessions.clear();
     this.textCache.clear();
+    this.views.clear();
   },
 
   openPane(reader) {
@@ -83,15 +87,41 @@ var ReaderChat = {
     return null;
   },
 
+  bindView(body, itemID) {
+    const previous = Number(body.dataset?.siAttachmentId);
+    if (previous && previous !== itemID) this.releaseView(body);
+    body.dataset.siAttachmentId = String(itemID);
+    if (!this.views.has(itemID)) this.views.set(itemID, new Set());
+    this.views.get(itemID).add(body);
+  },
+
+  releaseView(body) {
+    const itemID = Number(body?.dataset?.siAttachmentId);
+    if (!itemID) return;
+    delete body.dataset.siAttachmentId;
+    const views = this.views.get(itemID);
+    if (!views) return;
+    views.delete(body);
+    for (const view of views) if (view.isConnected === false) views.delete(view);
+    if (views.size) return;
+    this.views.delete(itemID);
+    const state = this.sessions.get(itemID);
+    if (state?.busy) {
+      state.controller?.abort(); state.controller = null;
+      state.generation += 1; state.busy = false;
+    }
+  },
+
   session(itemID) {
-    if (!this.sessions.has(itemID)) this.sessions.set(itemID, { history: [], busy: false, noteID: null });
+    if (!this.sessions.has(itemID)) this.sessions.set(itemID, { history: [], busy: false, saving: false, noteID: null, generation: 0, controller: null });
     return this.sessions.get(itemID);
   },
 
   render(doc, body) {
     body.replaceChildren();
     const attachment = this.attachmentForBody(body);
-    if (!attachment) return;
+    if (!attachment) { this.releaseView(body); return; }
+    this.bindView(body, attachment.id);
     const state = this.session(attachment.id);
     const el = (tag, className, label) => {
       const node = doc.createElement(tag);
@@ -155,11 +185,33 @@ var ReaderChat = {
     input.placeholder = "询问研究问题、方法、结果，或输入自己的问题…";
     const actions = el("div", "mineru-chat-toolbar");
     const send = el("button", "mineru-chat-send", "发送问题");
+    send.disabled = state.busy;
+    const stop = el("button", "", "暂停回答"); stop.disabled = !state.busy;
+    stop.addEventListener("click", () => state.controller?.abort());
     const save = el("button", "", "保存对话到文献笔记");
     save.disabled = !state.history.length || state.busy;
     const clear = el("button", "", "清空对话");
+    clear.disabled = state.saving;
     const settings = el("button", "", "模型设置");
     const status = el("div", "mineru-chat-status");
+    const modelControls = el("div", "mineru-chat-toolbar");
+    const savedSettings = Zotero.MinerUAI.getTaskSettings?.("reader") || { thinking: false, maxTokens: 8192 };
+    let thinking = savedSettings.thinking;
+    const thinkingButton = el("button", "", thinking ? "思考：开启" : "思考：关闭");
+    thinkingButton.setAttribute("aria-pressed", String(thinking));
+    thinkingButton.disabled = state.busy;
+    thinkingButton.addEventListener("click", () => {
+      thinking = !thinking;
+      Zotero.MinerUAI.saveTaskSettings?.("reader", { thinking });
+      thinkingButton.textContent = thinking ? "思考：开启" : "思考：关闭";
+      thinkingButton.setAttribute("aria-pressed", String(thinking));
+    });
+    const outputLimit = el("select"); outputLimit.style.width = "auto";
+    outputLimit.setAttribute("aria-label", "回答 Token 上限");
+    for (const value of [4096, 8192, 16384, 32768]) { const option = el("option", "", `${value.toLocaleString()} Token`); option.value = String(value); outputLimit.append(option); }
+    outputLimit.value = String(savedSettings.maxTokens); outputLimit.disabled = state.busy;
+    outputLimit.addEventListener("change", () => Zotero.MinerUAI.saveTaskSettings?.("reader", { maxTokens: Number(outputLimit.value) }));
+    modelControls.append(thinkingButton, outputLimit);
     const copyText = async (text, btn) => {
       let ok = false;
       try {
@@ -294,36 +346,52 @@ var ReaderChat = {
       const question = input.value.trim();
       if (!question || state.busy) return;
       state.busy = true;
+      const generation = state.generation;
+      const Controller = typeof AbortController !== "undefined" ? AbortController : doc.defaultView.AbortController;
+      const controller = new Controller(); state.controller = controller;
+      stop.disabled = false; thinkingButton.disabled = true; outputLimit.disabled = true; profileSelect.disabled = true;
       send.disabled = true;
       save.disabled = true;
       input.value = "";
       addMessage("user", question);
       const answerHandle = addMessage("assistant", "正在读取 PDF…");
       try {
-        const fullText = await this.getPdfText(attachment, (message) => { status.textContent = message; });
+        const fullText = await this.getPdfText(attachment, (message) => { if (generation === state.generation) status.textContent = message; }, { signal: controller.signal });
+        if (controller.signal.aborted) { const error = new Error("回答已暂停。"); error.name = "AbortError"; throw error; }
         const context = this.selectContext(fullText, question);
         status.textContent = "正在等待模型回答…";
         const answer = await LLMClient.chatWithPdf(
           context,
           [...state.history, { role: "user", content: question }],
-          Zotero.MinerUAI.getConfig(),
+          { ...Zotero.MinerUAI.getConfig("reader"), llmThinking: thinking, llmMaxTokens: Number(outputLimit.value) },
           (_delta, full) => {
+            if (generation !== state.generation || controller.signal.aborted) return;
             answerHandle.updateContent(full);
             log.scrollTop = log.scrollHeight;
-          }
+          }, { signal: controller.signal }
         );
+        if (generation !== state.generation || controller.signal.aborted) return;
         const assistantEntry = { role: "assistant", content: answer };
         state.history.push({ role: "user", content: question }, assistantEntry);
         answerHandle.attachHistory(assistantEntry);
         status.textContent = "回答完成";
       } catch (error) {
-        answerHandle.updateContent(`出错：${error.message}`);
-        status.textContent = "请检查 PDF 正文和模型设置";
-        Zotero.logError(error);
+        if (generation !== state.generation) return;
+        if (controller.signal.aborted || error?.name === "AbortError") {
+          status.textContent = "回答已暂停。问题已放回输入框，可调整后重新发送。";
+          input.value = question;
+        } else {
+          answerHandle.updateContent(`出错：${error.message}`);
+          status.textContent = "请检查 PDF 正文和模型设置";
+          Zotero.logError(error);
+        }
       } finally {
-        state.busy = false;
-        send.disabled = false;
-        save.disabled = !state.history.length;
+        if (generation === state.generation) {
+          state.busy = false; state.controller = null;
+          send.disabled = false; stop.disabled = true;
+          thinkingButton.disabled = false; outputLimit.disabled = false; profileSelect.disabled = false;
+          save.disabled = !state.history.length;
+        }
       }
     };
     send.addEventListener("click", submit);
@@ -334,67 +402,62 @@ var ReaderChat = {
       }
     });
     clear.addEventListener("click", () => {
-      state.history = [];
+      if (state.saving) return;
+      state.controller?.abort(); state.controller = null;
+      state.generation += 1; state.busy = false;
+      state.history = []; state.noteID = null;
       log.replaceChildren();
-      status.textContent = "对话已清空";
-      save.disabled = true;
+      status.textContent = "对话已清空。已保存的笔记保留，新对话将另存为新笔记。";
+      save.disabled = true; send.disabled = false; stop.disabled = true;
+      thinkingButton.disabled = false; outputLimit.disabled = false; profileSelect.disabled = false;
     });
     save.addEventListener("click", async () => {
-      if (!state.history.length || state.busy) return;
+      if (!state.history.length || state.busy || state.saving) return;
+      state.saving = true; clear.disabled = true;
+      const snapshot = state.history.map(entry => ({ role: entry.role, content: String(entry.content) }));
       save.disabled = true;
       status.textContent = "正在保存到 Zotero 笔记…";
       try {
-        const note = await ZoteroAdapter.saveConversationNote(attachment, state.history, state.noteID);
+        const note = await ZoteroAdapter.saveConversationNote(attachment, snapshot, state.noteID);
         state.noteID = note.id;
         status.textContent = "已保存到当前文献的笔记。继续对话后可再次点击更新。";
       } catch (error) {
         status.textContent = `保存失败：${error.message}`;
         Zotero.logError(error);
       } finally {
-        save.disabled = false;
+        state.saving = false; clear.disabled = false;
+        save.disabled = state.busy || !state.history.length;
       }
     });
     settings.addEventListener("click", () => Zotero.MinerUAI.openPreferences());
-    actions.append(send, save, clear, settings);
-    root.append(heading, intro, profileSelect, promptBar, customEditor, log, input, actions, status);
+    actions.append(send, stop, save, clear, settings);
+    root.append(heading, intro, profileSelect, modelControls, promptBar, customEditor, log, input, actions, status);
     body.append(style, root);
   },
 
-  async getPdfText(attachment, report) {
-    if (this.textCache.has(attachment.id)) return this.textCache.get(attachment.id);
-    const task = (async () => {
+  async getPdfText(attachment, report, { signal } = {}) {
+    const check = () => { if (signal?.aborted) { const error = new Error("回答已暂停。"); error.name = "AbortError"; throw error; } };
+    check();
+    const config = Zotero.MinerUAI.getConfig("reader");
+    const info = await ZoteroAdapter.getPdfAttachment(attachment);
+    const extract = async () => {
       report("正在提取 PDF 正文…");
-      const config = Zotero.MinerUAI.getConfig();
-      const info = await ZoteroAdapter.getPdfAttachment(attachment);
-      if (info && typeof SummaryTextCache !== "undefined") {
-        try {
-          const cached = await SummaryTextCache.get(info, config, async () => {
-            let text = (await Zotero.PDFWorker.getFullText(attachment.id, null))?.text || "";
-            if (!text.trim() && info.filePath) {
-              report("未找到文字层，正在使用 MinerU 解析扫描版 PDF…");
-              const bytes = await ZoteroAdapter.readFileBinary(info.filePath);
-              const parsed = await MinerUClient.parsePdf(info.fileName, bytes,
-                { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel }, report);
-              text = parsed.markdown || "";
-            }
-            return text;
-          }, report);
-          if (cached?.text?.trim()) return cached.text;
-        } catch (_) {}
-      }
-      let text = (await Zotero.PDFWorker.getFullText(attachment.id, null))?.text || "";
+      let text = "";
+      try { text = (await Zotero.PDFWorker.getFullText(attachment.id, null))?.text || ""; }
+      catch (error) { if (signal?.aborted) throw error; }
+      check();
       if (text.trim()) return text;
-      report("未找到可复制文字，正在使用 MinerU 解析扫描版 PDF…");
       if (!info?.filePath) throw new Error("当前 PDF 没有可读取的本地文件。");
-      const bytes = await ZoteroAdapter.readFileBinary(info.filePath);
+      report("未找到可复制文字，正在使用 MinerU 解析扫描版 PDF…");
+      const bytes = await ZoteroAdapter.readFileBinary(info.filePath); check();
       const parsed = await MinerUClient.parsePdf(info.fileName, bytes,
-        { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel }, report);
+        { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel, signal }, report);
       if (!parsed?.markdown?.trim()) throw new Error("PDF 和 MinerU 均未提取到正文。");
       return parsed.markdown;
-    })();
-    this.textCache.set(attachment.id, task);
-    try { return await task; }
-    catch (error) { this.textCache.delete(attachment.id); throw error; }
+    };
+    const text = info && typeof SummaryTextCache !== "undefined"
+      ? (await SummaryTextCache.get(info, config, extract, report, { signal })).text : await extract();
+    check(); return text;
   },
 
   selectContext(text, question) {

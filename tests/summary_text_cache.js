@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 (async()=>{
  let mtime=1,size=100,calls=0,release;
- const ctx=vm.createContext({Zotero:{File:{pathToFile:path=>({path,exists:()=>true,get lastModifiedTime(){return mtime;},get fileSize(){return size;}})}}});
+ const ctx=vm.createContext({setTimeout,clearTimeout,Zotero:{File:{pathToFile:path=>({path,exists:()=>true,get lastModifiedTime(){return mtime;},get fileSize(){return size;}})}}});
  vm.runInContext(fs.readFileSync('plugin_src/chrome/content/scripts/summary_text_cache.js','utf8'),ctx);
  const cache=ctx.SummaryTextCache,info={filePath:'paper.pdf',attachmentItem:{key:'ABC',libraryID:1}},config={mineruMode:'agent'};
  const extract=async()=>{calls++;return 'full original text';};

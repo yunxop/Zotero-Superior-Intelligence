@@ -28,7 +28,7 @@ def build_plugin():
         raise ValueError("Zotero manifest 缺少必需字段: " + ", ".join(missing))
 
     name = manifest.get("name", "zotero-plugin")
-    version = manifest.get("version", "1.0.0")
+    version = manifest["version"]
     min_version = manifest.get("applications", {}).get("zotero", {}).get("strict_min_version")
 
     print(f"=== 构建 Zotero 10 扩展安装包 ===")

@@ -6,7 +6,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](LICENSE)
 [![100% Free & Open Source](https://img.shields.io/badge/100%25-Free%20%26%20Open%20Source-brightgreen.svg)](#-纯粹开源零门槛人人用得起)
 [![Zero Paywall](https://img.shields.io/badge/Zero-Paywall-blue.svg)](#-纯粹开源零门槛人人用得起)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-brightgreen.svg)](https://github.com/yunz1110/Zotero-Superior-Intelligence/releases)
+[![Release](https://img.shields.io/badge/Release-v1.1.0-brightgreen.svg)](https://github.com/yunz1110/Zotero-Superior-Intelligence/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yunz1110/Zotero-Superior-Intelligence/pulls)
 
 **专为下一代 Zotero 10 深度定制 · 100% 永久免费开源 · 让每个人都用得起的顶配 AI 学术伴侣**  
@@ -85,7 +85,7 @@
 ### 方式一：直接安装官方预编译包（推荐）
 
 1. 前往本仓库 [Releases](https://github.com/yunz1110/Zotero-Superior-Intelligence/releases) 页面，或在 `dist/` 目录中下载最新版安装包：
-   - 📥 **`zotero-superior-intelligence-1.0.0.xpi`**
+   - 📥 **`zotero-superior-intelligence-1.1.0.xpi`**
 2. 启动 **Zotero**（专为 Zotero 10 深度优化，亦向下兼容 Zotero 7.0 及以上版本）。
 3. 点击顶部菜单栏：**工具 (Tools)** -> **插件 (Add-ons / Plugins)**。
 4. 将下载的 `.xpi` 文件直接**拖入插件窗口**（或点击右上角齿轮图标选择 `Install Add-on From File...`）。
@@ -104,12 +104,14 @@ python build_xpi.py
 npm run build
 
 # 3. 生成的安装包位于 dist/ 目录：
-# dist/zotero-superior-intelligence-1.0.0.xpi
+# dist/zotero-superior-intelligence-1.1.0.xpi
 ```
 
 ---
 
 ## ⚙️ 配置与使用指南
+
+思考模式和各任务的 Token 上限会自动保存；工作台支持暂停任务及复用已完成分段续跑。PDF 对话清空后另建笔记，公式可在界面和 Zotero 笔记中显示、编辑。详见 [设置保存与任务续跑](docs/TASK_CONTROLS.md)。
 
 ### 1. 打开插件首选项
 在 Zotero 主界面点击：**编辑 (Edit)** -> **首选项 (Preferences)** -> 选择 **Superior Intelligence (SI)** 标签页。
@@ -168,7 +170,8 @@ zotero-superior-intelligence/
 │   └── ui-preview/            # 离线预览与截图资产
 └── dist/                      # 分发产物目录
     ├── DIST_CATALOG.md        # 分发目录规范说明
-    ├── zotero-superior-intelligence-1.0.0.xpi  # 最新发布包
+    ├── zotero-superior-intelligence-1.1.0.xpi  # 当前版本安装包
+    ├── zotero-superior-intelligence-1.0.0.xpi  # 原始旧版安装包
     └── archive/               # 历史安装包归档子目录
 ```
 

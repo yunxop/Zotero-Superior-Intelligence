@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zotero Superior Intelligence",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SI literature reading assistant for Zotero 10 with PDF chat and MinerU extraction",
   "icons": {
     "48": "chrome/content/icons/favicon.png",

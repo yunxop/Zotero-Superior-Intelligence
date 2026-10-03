@@ -104,7 +104,7 @@ var ZoteroAdapter = {
   async createChildNote(targetItem, title, markdownContent) {
     if (!targetItem) return;
 
-    const htmlContent = MarkdownRenderer.toHTML(markdownContent);
+    const htmlContent = MarkdownRenderer.toNoteHTML ? MarkdownRenderer.toNoteHTML(markdownContent) : MarkdownRenderer.toHTML(markdownContent);
 
     const noteItem = new Zotero.Item("note");
     if (targetItem.isAttachment?.()) {
@@ -128,7 +128,7 @@ var ZoteroAdapter = {
     if (!history?.length) throw new Error("当前还没有可以保存的对话。");
     const parent = attachment.parentItemID ? Zotero.Items.get(attachment.parentItemID) : null;
     let note = existingNoteID ? Zotero.Items.get(existingNoteID) : null;
-    if (!note?.isNote?.()) {
+    if (!note?.isNote?.() || note.deleted || note.libraryID !== attachment.libraryID || (note.parentID || null) !== (parent?.id || null)) {
       note = new Zotero.Item("note");
       note.libraryID = attachment.libraryID;
       if (parent) note.parentID = parent.id;
@@ -136,8 +136,8 @@ var ZoteroAdapter = {
     const source = parent?.getField?.("title") || attachment.attachmentFilename || "PDF";
     const title = `AI 阅读对话 · ${source}`;
     const sections = history.map((entry, index) => entry.role === "user"
-      ? `<h3>问题 ${Math.floor(index / 2) + 1}</h3><p>${MarkdownRenderer.escape(entry.content)}</p>`
-      : `<h3>AI 回答</h3>${MarkdownRenderer.toHTML(entry.content)}`);
+      ? `<h3>问题 ${Math.floor(index / 2) + 1}</h3><p>${MarkdownRenderer.inline(entry.content, { mathOutput: "zotero" })}</p>`
+      : `<h3>AI 回答</h3>${MarkdownRenderer.toNoteHTML ? MarkdownRenderer.toNoteHTML(entry.content) : MarkdownRenderer.toHTML(entry.content)}`);
     note.setNote(`<h2>${MarkdownRenderer.escape(title)}</h2>` +
       `<p>来源 PDF：${MarkdownRenderer.escape(attachment.attachmentFilename || source)}</p>` +
       sections.join("<hr/>"));

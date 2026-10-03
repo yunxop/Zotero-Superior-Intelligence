@@ -15,7 +15,21 @@ var SummaryTextCache = {
     } catch (_) { return null; }
   },
   clear() { this.entries.clear(); this.pending.clear(); },
-  async get(info, config, extract, report = () => {}) {
+  abortError() { const error = new Error('任务已暂停；已完成的分段保留。'); error.name = 'AbortError'; return error; },
+  wait(work, signal, timeoutMs = 0) {
+    work = Promise.resolve(work);
+    if (signal?.aborted) return Promise.reject(this.abortError());
+    return new Promise((resolve, reject) => {
+      let timer;
+      const cleanup = () => { if (timer) clearTimeout(timer); signal?.removeEventListener('abort', abort); };
+      const abort = () => { cleanup(); reject(this.abortError()); };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (timeoutMs) timer = setTimeout(() => { cleanup(); reject(new Error('等待已有提取任务超时，请稍后继续。')); }, timeoutMs);
+      work.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+    });
+  },
+  async get(info, config, extract, report = () => {}, { signal } = {}) {
+    if (signal?.aborted) throw this.abortError();
     const key = this.fingerprint(info, config);
     if (key && this.entries.has(key)) {
       const text = this.entries.get(key); this.entries.delete(key); this.entries.set(key, text);
@@ -23,18 +37,12 @@ var SummaryTextCache = {
     }
     if (key && this.pending.has(key)) {
       report('正在等待同一 PDF 的正文提取完成…');
-      try {
-        const text = await Promise.race([
-          this.pending.get(key),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('等待已有提取任务超时')), 60000))
-        ]);
-        return { text, cached: true };
-      } catch (_e) {
-        this.pending.delete(key);
-      }
+      const text = await this.wait(this.pending.get(key), signal, 60000);
+      return { text, cached: true };
     }
     const work = (async () => {
       const text = await extract();
+      if (signal?.aborted) throw this.abortError();
       if (!String(text || '').trim()) throw new Error('PDF 中未提取到可用于总结的文字。');
       if (key && this.fingerprint(info, config) === key && text.length <= this.maxChars) {
         this.entries.set(key, text);
@@ -46,7 +54,8 @@ var SummaryTextCache = {
       return text;
     })();
     if (key) this.pending.set(key, work);
-    try { return { text: await work, cached: false }; }
-    finally { if (key && this.pending.get(key) === work) this.pending.delete(key); }
+    const done = () => { if (key && this.pending.get(key) === work) this.pending.delete(key); };
+    work.then(done, done);
+    return { text: await this.wait(work, signal), cached: false };
   }
 };

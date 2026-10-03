@@ -10,6 +10,45 @@ var MinerUClient = {
   AGENT_BASE_URL: "https://mineru.net/api/v1/agent",
   PRECISE_BASE_URL: "https://mineru.net/api/v4",
 
+
+  abortError() {
+    const error = new Error("任务已取消。");
+    error.name = "AbortError"; error.cancelled = true;
+    return error;
+  },
+  throwIfAborted(signal) { if (signal?.aborted) throw this.abortError(); },
+  awaitWithSignal(operation, signal) {
+    if (!signal) return Promise.resolve(operation);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => signal.removeEventListener("abort", abort);
+      const abort = () => { cleanup(); reject(this.abortError()); };
+      signal.addEventListener("abort", abort, { once: true });
+      Promise.resolve(operation).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+      if (signal.aborted) abort();
+    });
+  },
+  async _fetch(url, options = {}) {
+    const signal = options.signal;
+    this.throwIfAborted(signal);
+    try {
+      const result = await this.awaitWithSignal(fetch(url, options), signal);
+      this.throwIfAborted(signal);
+      return result;
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError" || error?.cancelled === true) throw this.abortError();
+      throw error;
+    }
+  },
+  wait(ms, signal) {
+    this.throwIfAborted(signal);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => signal?.removeEventListener("abort", abort);
+      const abort = () => { clearTimeout(timer); cleanup(); reject(this.abortError()); };
+      const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+    });
+  },
   normalizeToken(value) {
     return String(value || "")
       .trim()
@@ -39,7 +78,9 @@ var MinerUClient = {
    * @param {Function} onProgress 进度回调函数
    * @returns {Promise<{markdown: string, taskId: string}>}
    */
-  async parseAgent(fileName, fileBuffer, onProgress = () => {}) {
+  async parseAgent(fileName, fileBuffer, onProgress = () => {}, options = {}) {
+    const signal = options.signal;
+    this.throwIfAborted(signal);
     onProgress("正在向 MinerU 申请上传签名链接 (Agent 模式)...");
 
     // 1. 申请上传签名
@@ -52,8 +93,8 @@ var MinerUClient = {
       is_ocr: false
     };
 
-    const applyRes = await fetch(applyUrl, {
-      method: "POST",
+    const applyRes = await this._fetch(applyUrl, {
+      method: "POST", signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(applyPayload)
     });
@@ -62,7 +103,7 @@ var MinerUClient = {
       throw new Error(`申请 MinerU 链接失败，HTTP 状态码: ${applyRes.status}`);
     }
 
-    const applyJson = await applyRes.json();
+    const applyJson = await this.awaitWithSignal(applyRes.json(), signal);
     if (applyJson.code !== 0 || !applyJson.data) {
       throw new Error(`MinerU 签名申请失败: ${applyJson.msg || "未知错误"}`);
     }
@@ -72,8 +113,8 @@ var MinerUClient = {
 
     // 2. PUT 上传本地 PDF 二进制流
     onProgress("正在上传文献至 MinerU 高性能解析通道...");
-    const uploadRes = await fetch(uploadUrl, {
-      method: "PUT",
+    const uploadRes = await this._fetch(uploadUrl, {
+      method: "PUT", signal,
       body: fileBuffer
     });
 
@@ -87,21 +128,22 @@ var MinerUClient = {
     const pollInterval = 2500; // 每 2.5 秒查询一次
 
     for (let i = 0; i < maxPollTimes; i++) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      await this.wait(pollInterval, signal);
 
       const pollUrl = `${this.AGENT_BASE_URL}/parse/${taskId}`;
-      const pollRes = await fetch(pollUrl);
+      const pollRes = await this._fetch(pollUrl, { signal });
       if (!pollRes.ok) continue;
 
-      const pollJson = await pollRes.json();
+      const pollJson = await this.awaitWithSignal(pollRes.json(), signal);
       if (pollJson.code !== 0) continue;
 
       const taskState = pollJson.data?.state;
       if (taskState === "done") {
         const mdUrl = pollJson.data.markdown_url;
         onProgress("MinerU 解析完成，正在下载结构化 Markdown 文本...");
-        const mdRes = await fetch(mdUrl);
-        const markdown = await mdRes.text();
+        const mdRes = await this._fetch(mdUrl, { signal });
+        if (!mdRes.ok) throw new Error(`下载 MinerU 正文失败 (HTTP ${mdRes.status})`);
+        const markdown = await this.awaitWithSignal(mdRes.text(), signal);
         return { markdown, taskId, mode: "agent" };
       } else if (taskState === "failed") {
         throw new Error(`MinerU 解析失败: ${pollJson.data?.err_msg || "未知错误"}`);
@@ -120,7 +162,9 @@ var MinerUClient = {
    * @param {string} token 用户 MinerU Token
    * @param {Function} onProgress 进度回调
    */
-  async parsePrecise(fileName, fileBuffer, token, model = "vlm", onProgress = () => {}) {
+  async parsePrecise(fileName, fileBuffer, token, model = "vlm", onProgress = () => {}, options = {}) {
+    const signal = options.signal;
+    this.throwIfAborted(signal);
     token = this.normalizeToken(token);
     model = model === "pipeline" ? "pipeline" : "vlm";
     if (!token) {
@@ -138,8 +182,8 @@ var MinerUClient = {
       model_version: model
     };
 
-    const applyRes = await fetch(applyUrl, {
-      method: "POST",
+    const applyRes = await this._fetch(applyUrl, {
+      method: "POST", signal,
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
@@ -149,7 +193,8 @@ var MinerUClient = {
 
     if (!applyRes.ok) {
       if (applyRes.status === 401 || applyRes.status === 403) {
-        const detail = await applyRes.json().catch(() => null);
+        const detail = await this.awaitWithSignal(applyRes.json(), signal).catch(() => null);
+        this.throwIfAborted(signal);
         const serverCode = detail?.msgCode || detail?.code;
         const code = serverCode ? `，错误码 ${serverCode}` : "";
         const traceID = detail?.trace_id || detail?.traceId;
@@ -159,7 +204,7 @@ var MinerUClient = {
       throw new Error(`MinerU 精准模式请求失败 (HTTP ${applyRes.status})`);
     }
 
-    const applyJson = await applyRes.json();
+    const applyJson = await this.awaitWithSignal(applyRes.json(), signal);
     if (applyJson.code !== 0 || !applyJson.data?.batch_id) {
       throw new Error(`MinerU 精准模式申请失败: ${applyJson.msg || "Token 无效或权限不足"}`);
     }
@@ -169,7 +214,7 @@ var MinerUClient = {
 
     // 上传文件
     onProgress("正在上传文献至精准模式解析通道...");
-    const uploadRes = await fetch(uploadUrl, { method: "PUT", body: fileBuffer });
+    const uploadRes = await this._fetch(uploadUrl, { method: "PUT", body: fileBuffer, signal });
     if (!uploadRes.ok) {
       throw new Error(`上传失败，HTTP 状态: ${uploadRes.status}`);
     }
@@ -178,21 +223,22 @@ var MinerUClient = {
     onProgress(`已上传，精准模型 (${model}) 正在进行版面与深度要素识别...`);
     const pollInterval = 3000;
     for (let i = 0; i < 150; i++) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      await this.wait(pollInterval, signal);
       const pollUrl = `${this.PRECISE_BASE_URL}/extract-results/batch/${batchId}`;
-      const pollRes = await fetch(pollUrl, {
+      const pollRes = await this._fetch(pollUrl, {
+        signal,
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (!pollRes.ok) continue;
 
-      const pollJson = await pollRes.json();
+      const pollJson = await this.awaitWithSignal(pollRes.json(), signal);
       const task = pollJson.data?.extract_result?.[0];
       if (!task) continue;
 
       if (task.state === "done") {
         if (!task.full_zip_url) throw new Error("MinerU 未返回解析结果下载地址。");
         onProgress("精准模式解析完成，正在读取 Markdown 正文…");
-        const markdown = await this.downloadMarkdownFromZip(task.full_zip_url);
+        const markdown = await this.downloadMarkdownFromZip(task.full_zip_url, { signal });
         return {
           markdown,
           zipUrl: task.full_zip_url,
@@ -211,8 +257,10 @@ var MinerUClient = {
     throw new Error("精准模式解析超时。");
   },
 
-  async downloadMarkdownFromZip(url) {
-    const response = await fetch(url);
+  async downloadMarkdownFromZip(url, options = {}) {
+    const signal = options.signal;
+    this.throwIfAborted(signal);
+    const response = await this._fetch(url, { signal });
     if (!response.ok) throw new Error(`下载 MinerU 解析包失败 (HTTP ${response.status})`);
     const tempFile = Zotero.getTempDirectory().clone();
     tempFile.append(`mineru-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
@@ -220,7 +268,10 @@ var MinerUClient = {
     const zipReader = Components.classes["@mozilla.org/libjar/zip-reader;1"]
       .createInstance(Components.interfaces.nsIZipReader);
     try {
-      await IOUtils.write(zipPath, new Uint8Array(await response.arrayBuffer()));
+      const bytes = new Uint8Array(await this.awaitWithSignal(response.arrayBuffer(), signal));
+      this.throwIfAborted(signal);
+      await IOUtils.write(zipPath, bytes);
+      this.throwIfAborted(signal);
       zipReader.open(tempFile);
       const entries = zipReader.findEntries("*");
       let markdownName = null;
@@ -235,6 +286,7 @@ var MinerUClient = {
       const { NetUtil } = ChromeUtils.importESModule("resource://gre/modules/NetUtil.sys.mjs");
       const stream = zipReader.getInputStream(markdownName);
       try {
+        this.throwIfAborted(signal);
         return NetUtil.readInputStreamToString(stream, zipReader.getEntry(markdownName).realSize,
           { charset: "UTF-8" });
       } finally {
@@ -252,9 +304,9 @@ var MinerUClient = {
   async parsePdf(fileName, fileBuffer, options = {}, onProgress = () => {}) {
     const mode = options.mode || "agent";
     if (mode === "precise") {
-      return await this.parsePrecise(fileName, fileBuffer, options.token, options.model, onProgress);
+      return await this.parsePrecise(fileName, fileBuffer, options.token, options.model, onProgress, options);
     } else {
-      return await this.parseAgent(fileName, fileBuffer, onProgress);
+      return await this.parseAgent(fileName, fileBuffer, onProgress, options);
     }
   }
 };

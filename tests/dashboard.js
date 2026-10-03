@@ -8,7 +8,7 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
     return { value: '', children: [], listeners: {}, open: false,
       append(...children) { this.children.push(...children); },
       replaceChildren() { this.children = []; }, dataset: {}, style: {},
-      addEventListener(name, fn) { this.listeners[name] = fn; },
+      addEventListener(name, fn) { this.listeners[name] = fn; }, setAttribute() {},
       showModal() { this.open = true; }, close() { this.open = false; }
     };
   }

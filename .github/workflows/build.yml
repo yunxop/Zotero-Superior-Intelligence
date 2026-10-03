@@ -28,18 +28,15 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Run Test Suite
+    - name: Install browser test dependencies
       run: |
-        node tests/smoke.js
-        node tests/auto_highlight.js
-        node tests/batch.js
-        node tests/dashboard.js
-        node tests/errors.js
-        node tests/library.js
-        node tests/library_ui.js
-        node tests/llm_controls.js
-        node tests/summary_text_cache.js
-        node tests/usage_layout.js
+        npm install --ignore-scripts
+        npx playwright install --with-deps chromium
+
+    - name: Run Test Suite
+      env:
+        SI_UI_SCREENSHOT: /tmp/si-library-ui.png
+      run: npm run test:all
 
     - name: Verify UI Previews Generator
       run: python docs/preview_ui.py
@@ -47,14 +44,30 @@ jobs:
     - name: Build XPI Package
       run: python build_xpi.py
 
+    - name: Read and verify release version
+      id: package
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        version = json.loads(Path("plugin_src/manifest.json").read_text())["version"]
+        if os.environ["GITHUB_EVENT_NAME"] == "release" and os.environ["RELEASE_TAG"] != f"v{version}":
+            raise SystemExit(f"Release tag must match manifest version: v{version}")
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"version={version}\n")
+        PY
+
     - name: Upload XPI Artifact
       uses: actions/upload-artifact@v4
       with:
         name: zotero-superior-intelligence-xpi
-        path: dist/*.xpi
+        path: dist/zotero-superior-intelligence-${{ steps.package.outputs.version }}.xpi
 
     - name: Upload Release Asset (.xpi)
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: dist/zotero-superior-intelligence-*.xpi
+        files: dist/zotero-superior-intelligence-${{ steps.package.outputs.version }}.xpi

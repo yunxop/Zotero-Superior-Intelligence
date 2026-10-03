@@ -26,6 +26,6 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
  context.fetch=async(_url,options)=>{requests++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>{aborted=true;reject(Error('abort'));}));};
  await assert.rejects(()=>context.LLMClient.complete([],config,{timeoutMs:20}),/未自动重试/);
  assert.equal(aborted,true);assert.equal(requests,1);
- const controller=new AbortController();const pending=context.LLMClient.complete([],config,{signal:controller.signal,timeoutMs:1000});controller.abort();await assert.rejects(pending,/abort/);
+ const controller=new AbortController();const pending=context.LLMClient.complete([],config,{signal:controller.signal,timeoutMs:1000});controller.abort();await assert.rejects(pending,error=>error.name==="AbortError"&&error.cancelled===true);
  console.log('LLM controls passed: DeepSeek non-thinking/cap, other providers unchanged, truncation accounting, timeout without retry and external cancellation');
 })().catch(error=>{console.error(error);process.exitCode=1;});

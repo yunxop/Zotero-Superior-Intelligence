@@ -80,7 +80,7 @@
    <html:section class="card">
     <html:div class="row"><html:label for="library-profile">模型</html:label><html:select id="library-profile" style="width:auto;max-width:75%"></html:select></html:div>
     <html:div class="row"><html:button id="library-thinking" type="button" aria-pressed="false">思考：关闭</html:button><html:label for="library-limit">本次输出上限</html:label><html:select id="library-limit" style="width:auto"><html:option value="4096">4,096 Token</html:option><html:option value="8192" selected="selected">8,192 Token</html:option><html:option value="16384">16,384 Token</html:option><html:option value="32768">32,768 Token</html:option></html:select></html:div>
-    <html:p class="muted">思考开关仅适用于官方 DeepSeek 混合模型；其他模型使用服务端策略。开启思考可能增加时间与用量。触及输出上限时保留部分结果，可保存为“未完成”笔记。</html:p>
+    <html:p class="muted">思考开关和输出上限自动保存，关闭界面后仍保留。思考开关仅适用于官方 DeepSeek 混合模型；其他模型使用服务端策略。开启思考可能增加时间与用量。触及输出上限时保留部分结果，可保存为“未完成”笔记。</html:p>
     <html:p class="muted">本地索引不消耗 Token。问答只发送检索片段；范围综述会分批发送全部所选资料。</html:p>
     <html:div class="divider"></html:div>
     <html:div id="library-conversation" class="conversation"><html:div class="empty" id="library-empty">让零散的阅读，形成清晰的研究线索。<html:p class="muted">例如：这些文献对碳循环机制有哪些不同解释？</html:p></html:div></html:div>

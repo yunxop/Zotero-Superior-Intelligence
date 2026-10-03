@@ -1,13 +1,13 @@
 {
   "name": "zotero-superior-intelligence",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zotero 10 AI Literature Assistant with native MinerU document parsing, deep PDF chat, auto-highlighting, and library-wide synthesis.",
   "main": "plugin_src/bootstrap.js",
   "scripts": {
     "build": "python build_xpi.py",
     "preview": "python docs/preview_ui.py",
     "test": "node tests/smoke.js",
-    "test:all": "node tests/smoke.js && node tests/auto_highlight.js && node tests/batch.js && node tests/dashboard.js && node tests/errors.js && node tests/library.js && node tests/library_ui.js && node tests/llm_controls.js && node tests/summary_text_cache.js && node tests/usage_layout.js"
+    "test:all": "node tests/smoke.js && node tests/auto_highlight.js && node tests/batch.js && node tests/dashboard.js && node tests/errors.js && node tests/library.js && node tests/library_ui.js && node tests/llm_controls.js && node tests/summary_text_cache.js && node tests/usage_layout.js && node tests/math_rendering.js && node tests/reader_protection.js && node tests/task_settings.js && node tests/task_resume.js && node tests/task_integration.js"
   },
   "keywords": [
     "zotero",
@@ -26,5 +26,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/yunz1110/Zotero-Superior-Intelligence.git"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

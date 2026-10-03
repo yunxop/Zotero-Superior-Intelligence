@@ -1,0 +1,52 @@
+const assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
+(async()=>{
+ const prefs=new Map(),items=new Map(),created=[];let nextID=100,saveRelease=null;
+ const attachment={id:8,libraryID:1,parentItemID:3,attachmentFilename:'paper.pdf'};
+ items.set(3,{id:3,getField:()=> 'Paper'});
+ const Zotero={Prefs:{get:key=>prefs.get(key),set:(key,value)=>prefs.set(key,value)},Items:{get:id=>items.get(id)},logError(){},
+  Item:class{constructor(type){assert.equal(type,'note');created.push(this);}isNote(){return true;}setNote(html){this.html=html;}async saveTx(){if(saveRelease!==null)await new Promise(r=>saveRelease=r);this.id ||=nextID++;items.set(this.id,this);}}};
+ const ctx=vm.createContext({Zotero,AbortController,setTimeout,clearTimeout,navigator:{},console});
+ for(const file of ['main.js','markdown_renderer.js','zotero_adapter.js','reader_chat.js'])vm.runInContext(fs.readFileSync('plugin_src/chrome/content/scripts/'+file,'utf8'),ctx);
+ const app=ctx.ZoteroMinerUAI,chat=ctx.ReaderChat;
+ chat.attachmentForBody=()=>attachment;chat.getPdfText=async()=> 'PDF text';
+ const element=tag=>({tag,children:[],attributes:{},style:{},listeners:{},value:'',dataset:{},
+  append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},setAttribute(k,v){this.attributes[k]=v;},
+  addEventListener(k,v){this.listeners[k]=v;},focus(){},remove(){},insertBefore(n,ref){this.children.splice(this.children.indexOf(ref),0,n);}});
+ const doc={createElement:element,defaultView:{AbortController}};const body=element('body');
+ const all=node=>[node,...node.children.flatMap(all)];
+ const button=text=>all(body).find(n=>n.tag==='button'&&n.textContent===text);
+ const input=()=>all(body).find(n=>n.attributes['aria-label']==='向当前文献提问');
+ const state=chat.session(attachment.id);
+ state.history.push({role:'user',content:'old question'},{role:'assistant',content:'old answer'});
+ chat.render(doc,body);
+ saveRelease=()=>{};
+ const firstSave=button('保存对话到文献笔记').listeners.click();
+ await button('保存对话到文献笔记').listeners.click();
+ button('清空对话').listeners.click();assert.equal(state.history.length,2,'clear is blocked while saving');
+ assert.equal(created.length,1,'double save cannot create duplicate notes');
+ saveRelease();saveRelease=null;await firstSave;
+ const old=items.get(state.noteID),oldHTML=old.html;
+ button('清空对话').listeners.click();assert.equal(state.noteID,null);assert.equal(state.history.length,0);
+ state.history.push({role:'user',content:'new question'},{role:'assistant',content:'new answer'});chat.render(doc,body);
+ await button('保存对话到文献笔记').listeners.click();assert.equal(created.length,2);assert.notEqual(state.noteID,old.id);assert.equal(old.html,oldHTML);
+ const newID=state.noteID;state.history.push({role:'user',content:'followup'},{role:'assistant',content:'more answer'});
+ await button('保存对话到文献笔记').listeners.click();assert.equal(created.length,2);assert.equal(state.noteID,newID);assert.match(items.get(newID).html,/more answer/);
+ app.saveTaskSettings('reader',{thinking:true,maxTokens:32768});chat.render(doc,body);
+ assert.equal(button('思考：开启').attributes['aria-pressed'],'true');
+ const limit=all(body).find(n=>n.attributes['aria-label']==='回答 Token 上限');assert.equal(limit.value,'32768');
+ limit.value='4096';limit.listeners.change();button('思考：开启').listeners.click();chat.render(doc,body);
+ assert.equal(button('思考：关闭').attributes['aria-pressed'],'false');assert.equal(all(body).find(n=>n.attributes['aria-label']==='回答 Token 上限').value,'4096');
+ ctx.LLMClient={chatWithPdf:async(_text,_history,_config,stream,{signal})=>{stream('partial','partial');await new Promise((resolve,reject)=>{if(signal.aborted){const e=Error('abort');e.name='AbortError';reject(e);}else signal.addEventListener('abort',()=>{const e=Error('abort');e.name='AbortError';reject(e);},{once:true});});return 'late answer';}};
+ input().value='pending question';const pending=button('发送问题').listeners.click();await Promise.resolve();
+ button('清空对话').listeners.click();await pending;
+ assert.equal(state.history.length,0,'late answer must not revive a cleared conversation');assert.equal(state.noteID,null);assert.equal(state.busy,false);assert.equal(old.html,oldHTML);
+ const extraBody=element('body');extraBody.isConnected=true;body.isConnected=true;
+ chat.bindView(extraBody,attachment.id);
+ const closeController=new AbortController();state.controller=closeController;state.busy=true;
+ chat.releaseView(body);assert.equal(closeController.signal.aborted,false,'closing one live view must not cancel another');
+ extraBody.isConnected=false;chat.releaseView(extraBody);assert.equal(closeController.signal.aborted,true);assert.equal(state.busy,false);assert.equal(chat.views.size,0);
+ state.noteID=old.id;attachment.libraryID=2;
+ const crossLibrary=await ctx.ZoteroAdapter.saveConversationNote(attachment,[{role:'user',content:'q'},{role:'assistant',content:'a'}],old.id);
+ assert.notEqual(crossLibrary.id,old.id,'a note from another library must not be overwritten');assert.equal(old.html,oldHTML);
+ console.log('reader protection passed: clear/new note, update same conversation, double save, late answer, settings reopen and wrong-library protection');
+})().catch(e=>{console.error(e);process.exitCode=1;});

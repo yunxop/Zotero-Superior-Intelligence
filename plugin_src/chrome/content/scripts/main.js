@@ -9,6 +9,8 @@ var ZoteroMinerUAI = {
   initialized: false,
   rootURI: "",
   paneId: null,
+  taskControllers: new Map(),
+  summarySaveLocks: new Map(),
 
   /**
    * 初始化核心控制器并注册系统服务
@@ -257,6 +259,60 @@ var ZoteroMinerUAI = {
 
   getUsage() { return LLMUsage.read(); },
 
+  getTaskSettings(type = "reader") {
+    let stored;
+    try { stored = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.taskSettings", true) || "{}"); }
+    catch (_) { stored = {}; }
+    const value = Number(stored?.limits?.[type]);
+    return { thinking: stored?.thinking === true,
+      maxTokens: [4096, 8192, 16384, 32768].includes(value) ? value : type === "table_summary" ? 16384 : 8192 };
+  },
+
+  saveTaskSettings(type, change) {
+    if (!["reader", "library", "paper_summary", "table_summary", "auto_highlight"].includes(type)) throw new Error("未知任务类型。");
+    let stored;
+    try { stored = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.taskSettings", true) || "{}"); }
+    catch (_) { stored = {}; }
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) stored = {};
+    if (change.thinking !== undefined) stored.thinking = change.thinking === true;
+    if (change.maxTokens !== undefined) {
+      const value = Number(change.maxTokens);
+      if (![4096, 8192, 16384, 32768].includes(value)) throw new Error("请选择有效的 Token 上限。");
+      stored.limits = { ...(stored.limits || {}), [type]: value };
+    }
+    Zotero.Prefs.set("extensions.zoteromineru.taskSettings", JSON.stringify(stored), true);
+    return this.getTaskSettings(type);
+  },
+
+  getLastSummaryType() {
+    const type = Zotero.Prefs.get("extensions.zoteromineru.lastSummaryType", true);
+    return ["paper_summary", "table_summary", "auto_highlight"].includes(type) ? type : "paper_summary";
+  },
+  saveLastSummaryType(type) {
+    if (["paper_summary", "table_summary", "auto_highlight"].includes(type)) Zotero.Prefs.set("extensions.zoteromineru.lastSummaryType", type, true);
+  },
+
+  beginTask(id) {
+    const Controller = typeof AbortController !== "undefined" ? AbortController : Zotero.getMainWindow().AbortController;
+    const controller = new Controller();
+    this.taskControllers.set(id, controller);
+    return controller.signal;
+  },
+  cancelTask(id) { this.taskControllers.get(id)?.abort(); },
+  finishTask(id) { this.taskControllers.delete(id); },
+  isTaskCancelled(error, signal) { return signal?.aborted === true || error?.name === "AbortError" || error?.cancelled === true; },
+  checkTaskSignal(signal) {
+    if (signal?.aborted) { const error = new Error("任务已暂停；已完成的分段保留，继续时会复用。"); error.name = "AbortError"; throw error; }
+  },
+
+  getBatchQueue() {
+    try {
+      const queue = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.batchQueue", true) || "{}");
+      return Array.isArray(queue?.pendingIDs) ? queue : null;
+    } catch (_) { return null; }
+  },
+  saveBatchQueue(queue) { Zotero.Prefs.set("extensions.zoteromineru.batchQueue", JSON.stringify(queue), true); },
+
   getSummaryTasks() {
     let data;
     try { data = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.summaryTasks", true) || "{}"); }
@@ -287,13 +343,14 @@ var ZoteroMinerUAI = {
     if (changed) this.persistSummaryTasks(data);
   },
 
-  startSummaryTask({ title, promptType, profileSlot, itemID = null }) {
+  startSummaryTask({ title, promptType, profileSlot, itemID = null, settings = null, prompt = "" }) {
     const data = this.getSummaryTasks();
     const task = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       title: String(title || "未命名文献").slice(0, 180),
       promptType, profileSlot, status: "running", stage: "等待处理",
-      createdAt: new Date().toISOString(), finishedAt: null, noteID: null, itemID, durationMs: null
+      createdAt: new Date().toISOString(), finishedAt: null, noteID: null, itemID, durationMs: null,
+      settings, prompt: String(prompt || "")
     };
     data.items.unshift(task);
     data.totals.created += 1;
@@ -340,11 +397,11 @@ var ZoteroMinerUAI = {
 
   getHighlightRules() { return AutoHighlight.rules; },
   describeError(error) { return SIError.describe(error); },
-  async highlightItem(item, onProgress, config = this.getConfig()) {
+  async highlightItem(item, onProgress, config = this.getConfig("auto_highlight"), options = {}) {
     // Transfer a string across the bootstrap/dashboard compartment boundary,
     // rather than relying on native exception properties surviving the boundary.
-    try { return JSON.stringify({ ok: true, result: await AutoHighlight.run(item, config, onProgress) }); }
-    catch (error) { return JSON.stringify({ ok: false, error: SIError.describe(error) }); }
+    try { return JSON.stringify({ ok: true, result: await AutoHighlight.run(item, config, onProgress, options) }); }
+    catch (error) { return JSON.stringify({ ok: false, cancelled: this.isTaskCancelled(error, options.signal), error: SIError.describe(error) }); }
   },
 
   async locateSummaryTask(task) {
@@ -360,21 +417,48 @@ var ZoteroMinerUAI = {
 
   getSelectedItem() { return ZoteroAdapter.getSelectedItem(); },
   getSelectedItemIDs() { return ZoteroAdapter.getSelectedItems().map(item => item.id); },
-  async runBatch(ids, type, config, prompt, onEvent, shouldStop) {
-    return SIBatch.run(this, ids, type, config, prompt, onEvent, shouldStop);
+  async runBatch(ids, type, config, prompt, onEvent, shouldStop, options = {}) {
+    const id = options.id || `batch-${Date.now()}`;
+    const signal = this.beginTask(id);
+    try { return await SIBatch.run(this, ids, type, config, prompt, onEvent, shouldStop, { signal }); }
+    finally { this.finishTask(id); }
   },
 
   renderMarkdown(container, markdown) { MarkdownRenderer.render(container, markdown); },
 
-  async saveSummary(result) {
+  async saveSummary(result, { signal } = {}) {
+    this.checkTaskSignal(signal);
     if (!result?.targetItem || !result?.markdown) throw new Error("没有可保存的总结。");
-    const kind = result.promptType === "table_summary" ? "表格总结" : "文献总结";
-    const timing = result.timings ? `**耗时：** 正文准备 ${(result.timings.extractionMs/1000).toFixed(1)} 秒${result.timings.cached ? "（复用缓存）" : ""}；模型生成 ${(result.timings.modelMs/1000).toFixed(1)} 秒\n\n` : "";
-    const header = `**文献：** ${result.title}\n\n**生成时间：** ${new Date().toLocaleString("zh-CN")}\n\n${timing}---\n\n`;
-    return ZoteroAdapter.createChildNote(result.targetItem, `${result.incomplete ? "未完成 · " : ""}${kind} · ${result.title}`, header + result.markdown);
+    const cacheKey = !result.incomplete && result.checkpointKey;
+    const save = async () => {
+      this.checkTaskSignal(signal);
+      const checkpoint = cacheKey && typeof TaskCheckpointCache !== "undefined" ? await TaskCheckpointCache.get(cacheKey) : null;
+      this.checkTaskSignal(signal);
+      if (checkpoint?.noteID) {
+        const note = Zotero.Items.get(checkpoint.noteID);
+        const parentID = result.targetItem.isAttachment?.() ? result.targetItem.parentItemID || null : result.targetItem.id;
+        if (note?.isNote?.() && !note.deleted && note.libraryID === result.targetItem.libraryID && (note.parentID || null) === parentID) return note;
+      }
+      const kind = result.promptType === "table_summary" ? "表格总结" : "文献总结";
+      const timing = result.timings ? `**耗时：** 正文准备 ${(result.timings.extractionMs/1000).toFixed(1)} 秒${result.timings.cached ? "（复用缓存）" : ""}；模型生成 ${(result.timings.modelMs/1000).toFixed(1)} 秒\n\n` : "";
+      const header = `**文献：** ${result.title}\n\n**生成时间：** ${new Date().toLocaleString("zh-CN")}\n\n${timing}---\n\n`;
+      this.checkTaskSignal(signal);
+      const note = await ZoteroAdapter.createChildNote(result.targetItem, `${result.incomplete ? "未完成 · " : ""}${kind} · ${result.title}`, header + result.markdown);
+      if (checkpoint && note?.id) {
+        try { await TaskCheckpointCache.put(cacheKey, { ...checkpoint, noteID: note.id }, { updateNoteID: true }); }
+        catch (error) { try { Zotero.logError(error); } catch (_) {} }
+      }
+      return note;
+    };
+    if (!cacheKey) return save();
+    const previous = this.summarySaveLocks.get(cacheKey) || Promise.resolve();
+    const work = previous.catch(() => {}).then(save);
+    this.summarySaveLocks.set(cacheKey, work);
+    try { return await work; }
+    finally { if (this.summarySaveLocks.get(cacheKey) === work) this.summarySaveLocks.delete(cacheKey); }
   },
 
-  getConfig() {
+  getConfig(type = "reader") {
     const slot = this.activeProfile();
     const profile = this.getProfiles()[slot - 1];
     return {
@@ -386,12 +470,15 @@ var ZoteroMinerUAI = {
       llmApiBase: profile.apiBase,
       llmApiKey: profile.apiKey,
       llmModel: profile.model,
+      llmThinking: this.getTaskSettings(type).thinking,
+      llmMaxTokens: this.getTaskSettings(type).maxTokens,
       autoGenerateNote: Zotero.Prefs.get("extensions.zoteromineru.autoGenerateNote", true) !== false,
       autoTag: Zotero.Prefs.get("extensions.zoteromineru.autoTag", true) !== false
     };
   },
 
-  async summarizeItem(item, promptType, onProgress = () => {}, config = this.getConfig(), prompt = this.getSummaryPrompt(promptType)) {
+  async summarizeItem(item, promptType, onProgress = () => {}, config = this.getConfig(promptType), prompt = this.getSummaryPrompt(promptType), options = {}) {
+    this.checkTaskSignal(options.signal);
     if (!["paper_summary", "table_summary"].includes(promptType)) {
       throw new Error("不支持的总结类型。");
     }
@@ -405,26 +492,32 @@ var ZoteroMinerUAI = {
       let text = "";
       try { text = (await Zotero.PDFWorker.getFullText(info.attachmentItem.id, null))?.text || ""; }
       catch (_error) { /* Fall back to OCR for scanned PDFs. */ }
+      this.checkTaskSignal(options.signal);
       if (!text.trim()) {
         if (!info.filePath) throw new Error("此 PDF 没有可读取的本地文件。");
         onProgress("正在使用 MinerU 提取扫描版 PDF（含上传与服务端排队）…");
         const bytes = await ZoteroAdapter.readFileBinary(info.filePath);
         const parsed = await MinerUClient.parsePdf(info.fileName, bytes,
-          { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel }, onProgress);
+          { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel, signal: options.signal }, onProgress);
         text = parsed.markdown || "";
       }
       return text;
-    }, onProgress);
+    }, onProgress, { signal: options.signal });
+    this.checkTaskSignal(options.signal);
     const extractionMs = Date.now() - extractionStarted;
     const chunks = Math.ceil(extracted.text.length / 45000);
     onProgress(`正文准备完成（${(extractionMs/1000).toFixed(1)} 秒${extracted.cached ? '，复用缓存' : ''}）；${extracted.text.length.toLocaleString()} 字符${chunks > 1 ? `，需先分析 ${chunks} 段再整合` : ''}。正在等待模型生成…`);
     const modelStarted = Date.now();
-    let incomplete = false;
+    let incomplete = false, checkpointKey = null;
     const result = await LLMClient.analyzePaper(extracted.text, promptType, config, (_delta, full) => {
       onProgress(`AI 正在生成总结（已生成 ${full.length} 字符）…`);
-    }, prompt, onProgress, () => { incomplete = true; });
+    }, prompt, onProgress, () => { incomplete = true; }, {
+      ...options, resumeKey: `summary:${info.attachmentItem.libraryID}:${info.attachmentItem.key || info.attachmentItem.id}:${promptType}`,
+      onCheckpoint: state => { checkpointKey = state.cacheKey; options.onCheckpoint?.(state); }
+    });
+    this.checkTaskSignal(options.signal);
     const timings = { extractionMs, modelMs: Date.now() - modelStarted, cached: extracted.cached, chunks };
-    return { markdown: result, title, targetItem, promptType, timings, incomplete };
+    return { markdown: result, title, targetItem, promptType, timings, incomplete, checkpointKey };
   },
 
   /**
@@ -544,10 +637,14 @@ var ZoteroMinerUAI = {
    * 销毁生命周期
    */
   async destroy() {
+    for (const controller of this.taskControllers.values()) controller.abort();
+    this.taskControllers.clear();
     if (typeof SummaryTextCache !== "undefined") SummaryTextCache.clear();
     if (typeof SILibraryChat !== "undefined") SILibraryChat.destroy();
-    const libraryWindow = Services.wm.getMostRecentWindow("zoteromineru:library");
-    if (libraryWindow && !libraryWindow.closed) libraryWindow.close();
+    for (const windowType of ["zoteromineru:library", "zoteromineru:dashboard"]) {
+      const assistantWindow = Services.wm.getMostRecentWindow(windowType);
+      if (assistantWindow && !assistantWindow.closed) assistantWindow.close();
+    }
     ReaderChat.unregister();
     // 1. 移除所有打开窗口中的注入 DOM 节点
     try {
@@ -571,6 +668,7 @@ var ZoteroMinerUAI = {
     }
 
     this.initialized = false;
+    if (Zotero.MinerUAI === this) delete Zotero.MinerUAI;
     Zotero.debug("[MinerU-AI] 插件核心模块已安全销毁");
   }
 };

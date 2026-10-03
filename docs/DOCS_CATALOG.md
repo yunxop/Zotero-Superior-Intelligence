@@ -20,3 +20,7 @@
 | `ICON_GENERATION.md` | 图标与视觉资产规范 | 说明插件各尺寸 Favicon、侧边栏 SVG 图标与高清视觉资产生成流程 | 原始矢量图与配色 | 多分辨率插件图标规范 |
 | `preview_ui.py` | UI 预览生成工具 | 解析生产环境 XHTML/CSS 并输出可在普通浏览器中独立预览的 HTML 文件 | `plugin_src/` 界面模板 | `ui-preview/*.html` 预览页面 |
 | `ui-preview/` | 界面预览与截图目录 | 包含科研工作台、首选项面板、阅读器侧边栏、全库检索的预览网页及渲染截图 | XHTML 转换产物与截图 | 离线界面展示与文档插图 |
+
+## 新增使用说明
+
+- [TASK_CONTROLS.md](TASK_CONTROLS.md)：思考与 Token 设置保存、对话笔记保护、原生公式、任务暂停和跨重启续跑。
