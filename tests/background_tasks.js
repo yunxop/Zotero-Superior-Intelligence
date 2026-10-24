@@ -86,10 +86,14 @@ function openView(f) {
   assert.equal(f.notes.length, 1); assert.equal(f.notes[0].targetItem.id, 12);
   assert.equal(f.app.getSummaryTasks().items[0].status, 'completed');
   assert.equal(f.app.taskControllers.size, 0);
+  f.select([14]);
   view = openView(f);
   assert.equal(view.nodes.get('mineru-dashboard-result').textContent, 'Saved after closing');
+  assert.equal(view.nodes.get('si-summary-dialog').open, false, 'completed replay must not open a modal');
+  assert.equal(view.nodes.get('mineru-selected-item').textContent, 'paper-14.pdf', 'old task must not replace a new selection');
   assert.equal(view.nodes.get('si-summary').disabled, false);
   assert.equal(f.notes.length, 1, 'reopening must not rerun or resave');
+  view.close(); f.select([12]); view = openView(f);
 
   // Close a running table summary; reopen with a different library selection.
   // The view must restore the active IDs and expose a working pause button.
@@ -101,6 +105,7 @@ function openView(f) {
   assert.equal(view.nodes.get('mineru-selected-item').textContent, 'paper-12.pdf');
   assert.equal(view.nodes.get('si-summary-type').value, 'table_summary');
   assert.equal(view.nodes.get('si-summary-progress').textContent, '后台分析第 2 段');
+  assert.equal(view.nodes.get('si-summary-dialog').open, false, 'running replay must also be unobtrusive');
   assert.equal(view.nodes.get('si-summary').disabled, true);
   view.click('si-dialog-pause'); await f.app.dashboardRun;
   assert.equal(f.operations[1].signal.aborted, true);

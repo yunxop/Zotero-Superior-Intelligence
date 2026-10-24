@@ -18,7 +18,7 @@ async function run(type, stopEarly = false) {
     if (item.id === 20) throw new Error('provider failed');
   };
   const app = {
-    saveSummaryPrompt() {}, describeError: e => e.message,
+    saveSummaryPrompt() { throw new Error('Background batches must not overwrite saved prompts'); }, describeError: e => e.message,
     startSummaryTask(task) { tasks.push({ ...task }); return tasks.length - 1; },
     updateSummaryTask(id, change) { Object.assign(tasks[id], change); },
     async summarizeItem(item, receivedType, report, cfg, prompt) { assert.equal(receivedType, type); assert.equal(prompt, 'prompt'); await work(item, report, cfg); return { markdown: 'result', itemID: item.id }; },
@@ -50,7 +50,7 @@ async function run(type, stopEarly = false) {
   batch.running = true;
   await assert.rejects(() => batch.run({}, [1], 'paper_summary', {}, ''), /已有批处理/);
   batch.running = false;
-  await assert.rejects(() => batch.run({ saveSummaryPrompt() { throw new Error('invalid prompt'); } }, [1], 'paper_summary', {}, ''), /invalid prompt/);
+  await assert.rejects(() => batch.run({}, [1], 'paper_summary', {}, ''), /提示词不能为空/);
   assert.equal(batch.running, false);
   console.log('batch queue tests passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

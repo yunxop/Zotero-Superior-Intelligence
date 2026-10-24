@@ -16,6 +16,14 @@
     const summaryButton = document.getElementById("si-summary");
     const typeField = document.getElementById("si-summary-type");
     const promptField = document.getElementById("si-summary-prompt");
+    const presetField = document.getElementById("si-prompt-preset");
+    const promptPresets = app.getSummaryPromptPresets();
+    let currentPreset = app.getSummaryPromptPreset(), editorType = null, editorPreset = null;
+    const promptDrafts = new Map();
+    const promptKey = (type, preset) => type === "paper_summary" ? `${type}:${preset}` : type;
+    const rememberDraft = () => {
+      if (editorType && editorType !== "auto_highlight") promptDrafts.set(promptKey(editorType, editorPreset), promptField.value);
+    };
     const profileField = document.getElementById("si-dashboard-profile");
     const thinkingButton = document.getElementById("si-thinking"), outputField = document.getElementById("si-output-limit");
     const limits = { paper_summary: 8192, table_summary: 16384, auto_highlight: 8192 };
@@ -39,6 +47,10 @@
       summaryButton.disabled = busy || count === 0;
     };
     const html = (tag) => document.createElementNS("http://www.w3.org/1999/xhtml", tag);
+    for (const preset of promptPresets) {
+      const option = html("option"); option.value = preset.id; option.textContent = preset.label; presetField.append(option);
+    }
+    presetField.value = currentPreset;
     const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
     const taskViews = new Map();
     const renderTasks = () => {
@@ -97,7 +109,9 @@
             resume.addEventListener("click", async () => {
               if (busy) return;
               const task = entry.task;
+              rememberDraft();
               typeField.value = task.promptType;
+              if (task.promptType === "paper_summary") currentPreset = task.promptPreset || "general";
               app.saveLastSummaryType?.(task.promptType);
               if (task.profileSlot) app.setActiveProfile(task.profileSlot);
               if (task.settings) app.saveTaskSettings?.(task.promptType, task.settings);
@@ -124,7 +138,13 @@
       if (saved) { thinking = saved.thinking; limits[typeField.value] = saved.maxTokens; paintThinking(); }
       outputField.value = String(limits[typeField.value] || 8192);
       const highlight = typeField.value === "auto_highlight";
-      promptField.value = highlight ? app.getHighlightRules() : app.getSummaryPrompt(typeField.value);
+      const paper = typeField.value === "paper_summary";
+      presetField.value = currentPreset;
+      document.getElementById("si-prompt-preset-box").hidden = !paper;
+      const preset = promptPresets.find(preset => preset.id === currentPreset);
+      document.getElementById("si-prompt-preset-description").textContent = preset?.description || "";
+      promptField.value = highlight ? app.getHighlightRules() : promptDrafts.get(promptKey(typeField.value, currentPreset)) ?? app.getSummaryPrompt(typeField.value, currentPreset);
+      editorType = typeField.value; editorPreset = currentPreset;
       promptField.readOnly = highlight;
       document.getElementById("si-prompt-save").hidden = highlight;
       document.getElementById("si-prompt-reset").hidden = highlight;
@@ -132,20 +152,28 @@
       summaryButton.textContent = highlight ? "为所选文献添加高亮" : "生成并保存到文献笔记";
       document.getElementById("si-action-help").textContent = highlight
         ? "将按以上规则标记所选文献的 PDF 原句，目标约 5%–15%，宁少勿滥；重复内容会跳过。需要可定位文字层，长文将分组分析并使用当前模型的 Token。"
-        : "预设提示词要求中文学术表达；专业术语首次出现可附英文。生成的结果会自动保存为当前文献的子笔记。";
+        : "提示词可编辑，点击“保存提示词”后下次打开仍保留；各总结角度独立保存。生成结果自动保存为文献子笔记。";
       resultView.dataset.mode = highlight ? "highlight" : "summary";
       updateSelectionCount();
     };
     loadPrompt();
-    typeField.addEventListener("change", () => { app.saveLastSummaryType?.(typeField.value); loadPrompt(); });
+    typeField.addEventListener("change", () => { rememberDraft(); app.saveLastSummaryType?.(typeField.value); loadPrompt(); });
+    presetField.addEventListener("change", () => {
+      if (busy) return;
+      rememberDraft();
+      currentPreset = app.setSummaryPromptPreset(presetField.value);
+      loadPrompt();
+    });
     document.getElementById("si-prompt-save").addEventListener("click", () => {
       try {
-        app.saveSummaryPrompt(typeField.value, promptField.value);
+        app.saveSummaryPrompt(typeField.value, promptField.value, currentPreset);
+        promptDrafts.delete(promptKey(typeField.value, currentPreset));
         status.textContent = "提示词已保存。";
       } catch (error) { status.textContent = error.message; }
     });
     document.getElementById("si-prompt-reset").addEventListener("click", () => {
-      promptField.value = app.resetSummaryPrompt(typeField.value);
+      promptField.value = app.resetSummaryPrompt(typeField.value, currentPreset);
+      promptDrafts.delete(promptKey(typeField.value, currentPreset));
       status.textContent = "已恢复并保存预设提示词。";
     });
 
@@ -216,7 +244,7 @@
       document.getElementById("si-dialog-pause").hidden = !value;
       document.getElementById("si-dialog-pause").disabled = !value;
       document.getElementById("si-batch-resume").disabled = value;
-      for (const id of ["si-thinking", "si-output-limit", "si-selection-refresh", "si-selection-all", "si-selection-none", "si-summary-type", "si-dashboard-profile", "si-summary-prompt", "si-prompt-save", "si-prompt-reset", "mineru-dashboard-extract"]) document.getElementById(id).disabled = value;
+      for (const id of ["si-thinking", "si-output-limit", "si-selection-refresh", "si-selection-all", "si-selection-none", "si-summary-type", "si-prompt-preset", "si-dashboard-profile", "si-summary-prompt", "si-prompt-save", "si-prompt-reset", "mineru-dashboard-extract"]) document.getElementById(id).disabled = value;
       selectionRows.forEach(row => { row.checkbox.disabled = value; });
       updateSelectionCount();
     };
@@ -226,7 +254,7 @@
     document.getElementById("si-batch-stop").addEventListener("click", requestPause);
     document.getElementById("si-dialog-pause").addEventListener("click", requestPause);
 
-    let displayedJobID = null, displayedResultRevision = -1, displayedStatus = null, launching = false;
+    let displayedJobID = null, displayedResultRevision = -1, launching = false;
     const batchResultViews = new Map();
     const stateLabels = { queued: "等待中", running: "处理中", partial: "未完成（已保存）", completed: "已完成", failed: "失败", skipped: "重复跳过", stopped: "已暂停 / 未执行" };
     const renderResults = job => {
@@ -275,11 +303,19 @@
       if (isNew) {
         displayedJobID = job.id; displayedResultRevision = -1;
         batchResultViews.clear();
-        // Reconnect the view to the exact IDs captured at launch, even when the
-        // library selection has changed while this window was closed.
+        // Active jobs restore their captured controls; old results must not
+        // replace the new library selection or the user's current prompt.
         busy = false;
-        if (job.kind !== "extract" && !launching) { typeField.value = job.type; loadPrompt(); }
-        window.siLoadSelection(job.ids);
+        if (running) {
+          if (job.kind !== "extract" && !launching) {
+            rememberDraft(); typeField.value = job.type;
+            if (job.type === "paper_summary") currentPreset = job.promptPreset || "general";
+            loadPrompt();
+            const captured = app.getDashboardJobPrompt(job.id);
+            if (job.type !== "auto_highlight") promptField.value = captured;
+          }
+          window.siLoadSelection(job.ids);
+        }
       }
       currentJobID = running ? job.id : null;
       if (isNew || busy !== running) setQueueBusy(running);
@@ -290,6 +326,11 @@
       setText(document.getElementById("si-summary-progress"), job.message);
       setText(document.getElementById("si-summary-dialog-title"), job.title);
       setText(document.getElementById("si-summary-dialog-hint"), job.hint);
+      const banner = document.getElementById("si-job-status");
+      banner.hidden = false; banner.dataset.status = job.status;
+      const titles = job.ids.slice(0, 2).map(id => itemTitle(Zotero.Items.get(id)) || `文献 ${id}`);
+      const context = titles.join("、") + (job.ids.length > 2 ? ` 等 ${job.ids.length} 篇` : "");
+      setText(document.getElementById("si-job-message"), `${job.title} · ${context}\n${job.message}`);
       for (const entry of job.rows) {
         const view = selectionRows.get(entry.itemID);
         if (!view) continue;
@@ -298,15 +339,16 @@
       }
       renderResults(job); renderTasks(); renderBatchResume();
       const dialog = document.getElementById("si-summary-dialog");
-      if ((isNew || displayedStatus === "running" && !running) && !dialog.open) dialog.showModal();
-      displayedStatus = job.status;
+      // Only a new launch in this window opens a modal. Replayed snapshots and
+      // completion after dismissing it remain visible in the inline status.
+      if (isNew && launching && !dialog.open) dialog.showModal();
     };
     const launch = kind => {
       if (busy) return;
       if (!pickedIDs().length) { status.textContent = "请先在文献列表中选择条目。"; return; }
       try {
         launching = true;
-        app.startDashboardJob(JSON.stringify({ kind, ids: pickedIDs(), type: typeField.value, config: taskConfig(), prompt: promptField.value }));
+        app.startDashboardJob(JSON.stringify({ kind, ids: pickedIDs(), type: typeField.value, config: taskConfig(), prompt: promptField.value, promptPreset: currentPreset }));
       } catch (error) { status.textContent = app.describeError(error); }
       finally { launching = false; }
     };
@@ -323,7 +365,9 @@
     document.getElementById("si-batch-resume").addEventListener("click", async () => {
       const queue = app.getBatchQueue?.();
       if (busy || !queue?.pendingIDs?.length) return;
+      rememberDraft();
       typeField.value = queue.type;
+      if (queue.type === "paper_summary") currentPreset = queue.promptPreset || "general";
       app.saveLastSummaryType?.(queue.type);
       if (queue.profileSlot) app.setActiveProfile(queue.profileSlot);
       if (queue.settings) app.saveTaskSettings?.(queue.type, queue.settings);
@@ -337,6 +381,10 @@
     window.addEventListener("unload", () => { unsubscribe(); }, { once: true });
 
     summaryButton.addEventListener("click", summarize);
+    document.getElementById("si-job-details").addEventListener("click", () => {
+      const dialog = document.getElementById("si-summary-dialog");
+      if (!dialog.open) dialog.showModal();
+    });
     document.getElementById("si-summary-dialog-close").addEventListener("click", () => document.getElementById("si-summary-dialog").close());
     document.getElementById("mineru-dashboard-extract").addEventListener("click", () => launch("extract"));
     document.getElementById("mineru-dashboard-preferences").addEventListener("click", () => app.openPreferences());

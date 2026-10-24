@@ -336,6 +336,7 @@ var ZoteroMinerUAI = {
   // The bootstrap compartment owns execution. Windows exchange JSON snapshots
   // and subscribe only while open; no window promise or DOM is part of a job.
   getDashboardJob() { return JSON.stringify(this.dashboardJob?.snapshot || null); },
+  getDashboardJobPrompt(id) { return this.dashboardJob?.snapshot.id === id ? this.dashboardJob.prompt : ""; },
   getDashboardJobResults(id) {
     const job = this.dashboardJob;
     return JSON.stringify(job?.snapshot.id === id ? job.results : { result: null, items: [] });
@@ -371,14 +372,20 @@ var ZoteroMinerUAI = {
     if (!ids.length) throw new Error("请先在文献列表中选择条目。");
     if (!["summary", "extract"].includes(input.kind)) throw new Error("不支持的任务类型。");
     if (input.kind !== "extract" && !["paper_summary", "table_summary", "auto_highlight"].includes(input.type)) throw new Error("不支持的任务类型。");
+    input.promptPreset = input.kind !== "extract" && input.type === "paper_summary"
+      ? this.validateSummaryPromptPreset(input.promptPreset ?? this.getSummaryPromptPreset()) : null;
+    if (input.kind !== "extract" && input.type !== "auto_highlight") {
+      input.prompt = String(input.prompt ?? this.getSummaryPrompt(input.type, input.promptPreset));
+      if (!input.prompt.trim()) throw new Error("提示词不能为空。");
+    }
     if (input.kind === "extract") ids.splice(1);
     const kind = input.kind === "extract" ? "extract" : ids.length > 1 ? "batch" : "single";
     const id = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const job = { snapshot: { id, kind, ids, type: input.type, status: "running", cancelling: false,
+    const job = { snapshot: { id, kind, ids, type: input.type, promptPreset: input.promptPreset, status: "running", cancelling: false,
       title: kind === "extract" ? "正在提取 PDF 正文" : kind === "batch" ? "正在批量处理文献" : input.type === "auto_highlight" ? "正在标记文献" : "正在生成总结",
       message: "任务已开始，正在读取文献。", hint: "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
       rows: ids.map(itemID => ({ itemID, status: "queued" })), revision: 0, resultRevision: 0 },
-      results: { result: null, items: [] } };
+      prompt: String(input.prompt || ""), results: { result: null, items: [] } };
     const signal = this.beginTask(id);
     this.dashboardJob = job;
     // Always start from this compartment's microtask, even if the caller closes
@@ -428,7 +435,7 @@ var ZoteroMinerUAI = {
             this.retainDashboardResult(job, null, event);
             this.publishDashboardJob(job);
           }
-        }, () => signal.aborted, { id, signal }));
+        }, () => signal.aborted, { id, signal, promptPreset: input.promptPreset }));
         this.publishDashboardJob(job, {
           status: totals.stopped ? "paused" : totals.failed ? "failed" : totals.partial ? "partial" : "completed",
           title: totals.stopped ? "批处理已停止" : "批处理已结束",
@@ -449,10 +456,9 @@ var ZoteroMinerUAI = {
         return;
       }
       const highlight = type === "auto_highlight";
-      if (!highlight) this.saveSummaryPrompt(type, prompt);
       taskID = this.startSummaryTask({ title: (item.isAttachment?.() ? item.attachmentFilename : "") || item.getField?.("title") || "未命名文献",
         promptType: type, profileSlot: config.llmSlot, itemID: item.id,
-        settings: { thinking: config.llmThinking, maxTokens: config.llmMaxTokens }, prompt });
+        settings: { thinking: config.llmThinking, maxTokens: config.llmMaxTokens }, prompt, promptPreset: input.promptPreset });
       report("正在读取文献…");
       let message, incomplete = false;
       if (highlight) {
@@ -464,10 +470,10 @@ var ZoteroMinerUAI = {
         this.retainDashboardResult(job, { ...result, message });
         this.updateSummaryTask(taskID, { status: "completed", stage: message });
       } else {
-        const result = await this.summarizeItem(item, type, report, config, prompt, { signal });
+        const result = await this.summarizeItem(item, type, report, config, prompt, { signal, promptPreset: input.promptPreset });
         this.checkTaskSignal(signal);
         report("正在保存文献笔记…");
-        const note = await this.saveSummary(result, { signal });
+        const note = await this.saveSummary(result, { signal, promptPreset: input.promptPreset });
         incomplete = !!result.incomplete;
         this.updateSummaryTask(taskID, { status: incomplete ? "interrupted" : "completed", stage: incomplete ? "未完成：部分结果已保存" : "文献笔记已保存", noteID: note?.id || null });
         this.retainDashboardResult(job, { markdown: result.markdown, incomplete });
@@ -528,14 +534,14 @@ var ZoteroMinerUAI = {
     if (changed) this.persistSummaryTasks(data);
   },
 
-  startSummaryTask({ title, promptType, profileSlot, itemID = null, settings = null, prompt = "" }) {
+  startSummaryTask({ title, promptType, profileSlot, itemID = null, settings = null, prompt = "", promptPreset = null }) {
     const data = this.getSummaryTasks();
     const task = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       title: String(title || "未命名文献").slice(0, 180),
       promptType, profileSlot, status: "running", stage: "等待处理",
       createdAt: new Date().toISOString(), finishedAt: null, noteID: null, itemID, durationMs: null,
-      settings, prompt: String(prompt || "")
+      settings, prompt: String(prompt || ""), promptPreset: promptType === "paper_summary" ? promptPreset || "general" : null
     };
     data.items.unshift(task);
     data.totals.created += 1;
@@ -561,21 +567,51 @@ var ZoteroMinerUAI = {
     this.persistSummaryTasks(data);
   },
 
-  getSummaryPrompt(type) {
-    const key = type === "table_summary" ? "tableSummaryPrompt" : "paperSummaryPrompt";
-    return Zotero.Prefs.get(`extensions.zoteromineru.${key}`, true) || LLMClient.PROMPT_TEMPLATES[type];
+  getSummaryPromptPresets() {
+    const presets = typeof LLMClient !== "undefined" && LLMClient.PAPER_SUMMARY_PRESETS;
+    return presets ? presets.map(({ id, label, description }) => ({ id, label, description }))
+      : [{ id: "general", label: "综合阅读", description: "全面梳理研究背景、方法、结果、贡献与局限，保留原有自定义提示词。" }];
+  },
+  validateSummaryPromptPreset(id) {
+    if (!this.getSummaryPromptPresets().some(preset => preset.id === id)) throw new Error("请选择有效的总结角度。");
+    return id;
+  },
+  getSummaryPromptPreset() {
+    const id = Zotero.Prefs.get("extensions.zoteromineru.paperSummaryPreset", true);
+    return this.getSummaryPromptPresets().some(preset => preset.id === id) ? id : "general";
+  },
+  setSummaryPromptPreset(id) {
+    this.validateSummaryPromptPreset(id);
+    Zotero.Prefs.set("extensions.zoteromineru.paperSummaryPreset", id, true);
+    return id;
+  },
+  summaryPromptPreference(type, presetID) {
+    if (!["paper_summary", "table_summary"].includes(type)) throw new Error("不支持的提示词类型。");
+    if (type === "table_summary") return "extensions.zoteromineru.tableSummaryPrompt";
+    this.validateSummaryPromptPreset(presetID);
+    // Keep the existing preference as the general preset, without destructive migration.
+    return `extensions.zoteromineru.paperSummaryPrompt${presetID === "general" ? "" : `.${presetID}`}`;
+  },
+  defaultSummaryPrompt(type, presetID) {
+    if (type === "paper_summary" && presetID !== "general") return LLMClient.PAPER_SUMMARY_PRESETS.find(preset => preset.id === presetID).prompt;
+    return LLMClient.PROMPT_TEMPLATES[type];
+  },
+  getSummaryPrompt(type, presetID = this.getSummaryPromptPreset()) {
+    const key = this.summaryPromptPreference(type, presetID);
+    return Zotero.Prefs.get(key, true) || this.defaultSummaryPrompt(type, presetID);
   },
 
-  saveSummaryPrompt(type, prompt) {
-    if (!["paper_summary", "table_summary"].includes(type)) throw new Error("不支持的提示词类型。");
+  saveSummaryPrompt(type, prompt, presetID = this.getSummaryPromptPreset()) {
+    const key = this.summaryPromptPreference(type, presetID);
     const value = String(prompt || "").trim();
     if (!value) throw new Error("提示词不能为空。");
-    Zotero.Prefs.set(`extensions.zoteromineru.${type === "table_summary" ? "tableSummaryPrompt" : "paperSummaryPrompt"}`, value, true);
+    Zotero.Prefs.set(key, value, true);
   },
 
-  resetSummaryPrompt(type) {
-    this.saveSummaryPrompt(type, LLMClient.PROMPT_TEMPLATES[type]);
-    return this.getSummaryPrompt(type);
+  resetSummaryPrompt(type, presetID = this.getSummaryPromptPreset()) {
+    this.summaryPromptPreference(type, presetID);
+    this.saveSummaryPrompt(type, this.defaultSummaryPrompt(type, presetID), presetID);
+    return this.getSummaryPrompt(type, presetID);
   },
 
   async testLLM() { return LLMClient.testConnection(this.getConfig()); },
@@ -605,13 +641,13 @@ var ZoteroMinerUAI = {
   async runBatch(ids, type, config, prompt, onEvent, shouldStop, options = {}) {
     const id = options.id || `batch-${Date.now()}`;
     const signal = options.signal || this.beginTask(id);
-    try { return await SIBatch.run(this, ids, type, config, prompt, onEvent, shouldStop, { signal }); }
+    try { return await SIBatch.run(this, ids, type, config, prompt, onEvent, shouldStop, { signal, promptPreset: options.promptPreset }); }
     finally { if (!options.signal) this.finishTask(id); }
   },
 
   renderMarkdown(container, markdown) { MarkdownRenderer.render(container, markdown); },
 
-  async saveSummary(result, { signal } = {}) {
+  async saveSummary(result, { signal, promptPreset = result?.promptPreset || "general" } = {}) {
     this.checkTaskSignal(signal);
     if (!result?.targetItem || !result?.markdown) throw new Error("没有可保存的总结。");
     const cacheKey = !result.incomplete && result.checkpointKey;
@@ -624,9 +660,11 @@ var ZoteroMinerUAI = {
         const parentID = result.targetItem.isAttachment?.() ? result.targetItem.parentItemID || null : result.targetItem.id;
         if (note?.isNote?.() && !note.deleted && note.libraryID === result.targetItem.libraryID && (note.parentID || null) === parentID) return note;
       }
-      const kind = result.promptType === "table_summary" ? "表格总结" : "文献总结";
+      const angle = result.promptType === "table_summary" ? "表格总结"
+        : this.getSummaryPromptPresets().find(preset => preset.id === promptPreset)?.label || "综合阅读";
+      const kind = result.promptType === "table_summary" ? angle : `文献总结 · ${angle}`;
       const timing = result.timings ? `**耗时：** 正文准备 ${(result.timings.extractionMs/1000).toFixed(1)} 秒${result.timings.cached ? "（复用缓存）" : ""}；模型生成 ${(result.timings.modelMs/1000).toFixed(1)} 秒\n\n` : "";
-      const header = `**文献：** ${result.title}\n\n**生成时间：** ${new Date().toLocaleString("zh-CN")}\n\n${timing}---\n\n`;
+      const header = `**文献：** ${result.title}\n\n**总结角度：** ${angle}\n\n**生成时间：** ${new Date().toLocaleString("zh-CN")}\n\n${timing}---\n\n`;
       this.checkTaskSignal(signal);
       const note = await ZoteroAdapter.createChildNote(result.targetItem, `${result.incomplete ? "未完成 · " : ""}${kind} · ${result.title}`, header + result.markdown);
       if (checkpoint && note?.id) {
@@ -664,6 +702,7 @@ var ZoteroMinerUAI = {
 
   async summarizeItem(item, promptType, onProgress = () => {}, config = this.getConfig(promptType), prompt = this.getSummaryPrompt(promptType), options = {}) {
     this.checkTaskSignal(options.signal);
+    const promptPreset = promptType === "paper_summary" ? options.promptPreset ?? this.getSummaryPromptPreset() : null;
     if (!["paper_summary", "table_summary"].includes(promptType)) {
       throw new Error("不支持的总结类型。");
     }
@@ -708,7 +747,7 @@ var ZoteroMinerUAI = {
     } finally { progress.cancel(); }
     this.checkTaskSignal(options.signal);
     const timings = { extractionMs, modelMs: Date.now() - modelStarted, cached: extracted.cached, chunks };
-    return { markdown: result, title, targetItem, promptType, timings, incomplete, checkpointKey };
+    return { markdown: result, title, targetItem, promptType, promptPreset, timings, incomplete, checkpointKey };
   },
 
   /**

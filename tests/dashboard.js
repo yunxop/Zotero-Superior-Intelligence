@@ -82,6 +82,9 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
   nodes.get('si-summary-dialog-close').listeners.click();
   assert.equal(nodes.get('si-summary-dialog').open, false);
   release(); await app.dashboardRun;
+  assert.equal(nodes.get('si-summary-dialog').open, false, 'completion must respect the dismissed progress dialog');
+  assert.match(nodes.get('si-job-message').textContent, /完成|失败/);
+  nodes.get('si-job-details').listeners.click();
   assert.equal(nodes.get('si-summary-dialog').open, true);
   assert.equal(nodes.get('si-summary').disabled, false);
   assert.equal(nodes.get('si-summary-dialog-title').textContent, incomplete ? '未完成 · 部分结果已保存' : (highlight ? '文献高亮' : '总结') + (fail ? '失败' : '已完成'));

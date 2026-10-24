@@ -1,25 +1,25 @@
 // Serial queue: freeze item IDs/configuration; each document has independent history.
 var SIBatch = {
   running: false,
-  async run(app, ids, type, config, prompt, onEvent = () => {}, shouldStop = () => false, { signal } = {}) {
+  async run(app, ids, type, config, prompt, onEvent = () => {}, shouldStop = () => false, { signal, promptPreset = "general" } = {}) {
     if (this.running) throw new Error("已有批处理正在运行，请等待当前队列结束。");
     if (!["paper_summary", "table_summary", "auto_highlight"].includes(type)) throw new Error("不支持的批处理类型。");
     const queue = [...new Set(Array.from(ids).filter(Number.isInteger))];
     if (!queue.length) throw new Error("请至少勾选一篇文献。");
+    if (type !== "auto_highlight" && !String(prompt || "").trim()) throw new Error("提示词不能为空。");
     this.running = true;
     const snapshot = { ...config };
     const totals = { total: queue.length, completed: 0, partial: 0, failed: 0, skipped: 0, stopped: 0 };
     const seenPDFs = new Set();
     const savedQueue = { pendingIDs: [...queue], type, profileSlot: snapshot.llmSlot,
       settings: { thinking: snapshot.llmThinking === true, maxTokens: snapshot.llmMaxTokens || (type === "table_summary" ? 16384 : 8192) },
-      prompt: String(prompt || ""), status: "running", updatedAt: new Date().toISOString() };
+      prompt: String(prompt || ""), promptPreset: type === "paper_summary" ? promptPreset : null, status: "running", updatedAt: new Date().toISOString() };
     const persist = () => { savedQueue.updatedAt = new Date().toISOString(); app.saveBatchQueue?.(savedQueue); };
     const completed = itemID => { savedQueue.pendingIDs = savedQueue.pendingIDs.filter(id => id !== itemID); persist(); };
     const emit = event => { try { onEvent(JSON.stringify(event)); } catch (error) { try { Zotero.logError(error); } catch (_) {} } };
     const stop = () => { try { return signal?.aborted || shouldStop(); } catch (_) { return true; } };
     try {
       persist();
-      if (type !== "auto_highlight") app.saveSummaryPrompt(type, prompt);
       for (let i = 0; i < queue.length; i++) {
         const itemID = queue[i];
         if (stop()) {
@@ -42,7 +42,7 @@ var SIBatch = {
             continue;
           }
           seenPDFs.add(info.attachmentItem.id);
-          taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID: info.attachmentItem.id, settings: savedQueue.settings, prompt });
+          taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID: info.attachmentItem.id, settings: savedQueue.settings, prompt, promptPreset: savedQueue.promptPreset });
           const report = message => {
             stage = message;
             app.updateSummaryTask(taskID, { stage: message });
@@ -55,10 +55,10 @@ var SIBatch = {
             result = response.result;
             message = `新增 ${result.count} 条高亮，占原文 ${result.percent}%。` + (result.emptyPages ? ` ${result.emptyPages} 页无文字层。` : "");
           } else {
-            const summary = await app.summarizeItem(info.attachmentItem, type, report, snapshot, prompt, { signal });
+            const summary = await app.summarizeItem(info.attachmentItem, type, report, snapshot, prompt, { signal, promptPreset: savedQueue.promptPreset });
             app.checkTaskSignal?.(signal);
             report("正在保存文献笔记…");
-            const note = await app.saveSummary(summary, { signal });
+            const note = await app.saveSummary(summary, { signal, promptPreset: savedQueue.promptPreset });
             noteID = note?.id || null;
             incomplete = !!summary.incomplete;
             result = { markdown: summary.markdown, incomplete };
@@ -80,7 +80,7 @@ var SIBatch = {
           const detail = app.describeError(error);
           const message = detail.includes("失败阶段：") ? detail : `失败阶段：${stage}\n原因：${detail}`;
           if (taskID === null) {
-            try { taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID }); } catch (_) {}
+            try { taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID, settings: savedQueue.settings, prompt, promptPreset: savedQueue.promptPreset }); } catch (_) {}
           }
           try { if (taskID !== null) app.updateSummaryTask(taskID, { status: "failed", stage: message }); } catch (_) {}
           totals.failed++;

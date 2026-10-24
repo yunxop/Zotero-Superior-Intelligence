@@ -12,7 +12,7 @@
 2. **Git 归档策略**：
    - 遵循开源最佳实践，历史构建安装包已通过 `.gitignore` 排除，避免二进制文件导致 Git 仓库历史体积持续膨胀。
    - 本地开发可随时通过 `python build_xpi.py`（或 `npm run build`）重新生成对应版本的安装包。
-   - 当前构建目标为 `zotero-superior-intelligence-1.1.2.xpi`；保留本地修订版 `1.1.1`、上一发布版本 `1.1.0` 与原始 `1.0.0` 安装包供回退。
+   - 当前构建目标为 `zotero-superior-intelligence-1.1.3.xpi`；保留已发布 `1.1.2`、本地修订版 `1.1.1`、上一发布版本 `1.1.0` 与原始 `1.0.0` 安装包供回退。
    - 正式版本发布建议通过 GitHub Releases 进行二进制附件分发。
    - 发布以 [GitHub Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 中实际可下载的附件为准；构建目录中的文件不表示已经发布。
 
@@ -21,7 +21,8 @@
 | 文件 / 目录名 | 地位 | 功能描述 | 适用平台 |
 | :--- | :--- | :--- | :--- |
 | `DIST_CATALOG.md` | 目录架构文档 | 说明分发目录职责与安装包命名规则 | - |
-| `zotero-superior-intelligence-1.1.2.xpi` | 当前构建目标 | 汇总本地 1.1.1 修复与后台任务功能，并同步新仓库更新地址；详见 `docs/RELEASE_1.1.2.md` | Zotero 10.0.x |
+| `zotero-superior-intelligence-1.1.3.xpi` | 当前构建目标 | 修复重开重复弹窗，新增三套总结角度与独立提示词保存；详见 `docs/RELEASE_1.1.3.md` | Zotero 10.0.x |
+| `zotero-superior-intelligence-1.1.2.xpi` | 上一发布版本 | 汇总本地 1.1.1 修复与后台任务功能，并同步新仓库更新地址；详见 `docs/RELEASE_1.1.2.md` | Zotero 10.0.x |
 | `zotero-superior-intelligence-1.1.1.xpi` | 本地修订回退包 | 保留本地构建结果，包含响应完整性、附件选择、检索、网络超时、界面性能与工作台后台任务修复 | Zotero 10.0.x |
 | `zotero-superior-intelligence-1.1.0.xpi` | 上一版本安装包 | 增加设置保存、对话保护、完整公式、连贯追问与任务续跑 | Zotero 10 |
 | `zotero-superior-intelligence-1.0.0.xpi` | 原始旧版安装包 | 保留发布时原包，供版本回退 | Zotero 10 |

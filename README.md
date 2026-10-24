@@ -6,7 +6,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](LICENSE)
 [![100% Free & Open Source](https://img.shields.io/badge/100%25-Free%20%26%20Open%20Source-brightgreen.svg)](#-纯粹开源零门槛人人用得起)
 [![Zero Paywall](https://img.shields.io/badge/Zero-Paywall-blue.svg)](#-纯粹开源零门槛人人用得起)
-[![Release](https://img.shields.io/badge/Source-v1.1.2-brightgreen.svg)](https://github.com/yunxop/Zotero-Superior-Intelligence/releases)
+[![Release](https://img.shields.io/badge/Source-v1.1.3-brightgreen.svg)](https://github.com/yunxop/Zotero-Superior-Intelligence/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yunxop/Zotero-Superior-Intelligence/pulls)
 
 **专为下一代 Zotero 10 深度定制 · 100% 永久免费开源 · 让每个人都用得起的顶配 AI 学术伴侣**  
@@ -85,8 +85,8 @@
 
 ### 方式一：安装预编译包（推荐）
 
-1. 当前源码与构建目标版本为 **1.1.2**，安装包位于 `dist/`。已发布版本可在 [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 下载；自动更新清单仅在对应 Release 附件可下载后更新：
-   - 📥 **`zotero-superior-intelligence-1.1.2.xpi`**
+1. 当前源码与构建目标版本为 **1.1.3**，安装包位于 `dist/`。已发布版本可在 [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 下载；自动更新清单仅在对应 Release 附件可下载后更新：
+   - 📥 **`zotero-superior-intelligence-1.1.3.xpi`**
 2. 启动 **Zotero**（支持 Zotero 10.0.x；当前安装包不支持 Zotero 7/8/9）。
 3. 点击顶部菜单栏：**工具 (Tools)** -> **插件 (Add-ons / Plugins)**。
 4. 将下载的 `.xpi` 文件直接**拖入插件窗口**（或点击右上角齿轮图标选择 `Install Add-on From File...`）。
@@ -105,12 +105,14 @@ python build_xpi.py
 npm run build
 
 # 3. 生成的安装包位于 dist/ 目录：
-# dist/zotero-superior-intelligence-1.1.2.xpi
+# dist/zotero-superior-intelligence-1.1.3.xpi
 ```
 
 ---
 
 ## ⚙️ 配置与使用指南
+
+1.1.3 修复重开工作台反复出现旧任务弹窗，新增三套可独立编辑保存的总结角度。详见 [1.1.3 更新说明](docs/RELEASE_1.1.3.md)。
 
 1.1.2 将工作台任务移至插件后台，并汇总本地 1.1.1 修订中的响应完整性、指定 PDF 选择、中文单字检索、追问证据优先级、MinerU 超时与界面性能修复。详见 [1.1.2 更新说明](docs/RELEASE_1.1.2.md)。
 
@@ -173,7 +175,7 @@ zotero-superior-intelligence/
 │   └── ui-preview/            # 离线预览与截图资产
 └── dist/                      # 分发产物目录
     ├── DIST_CATALOG.md        # 分发目录规范说明
-    ├── zotero-superior-intelligence-1.1.2.xpi  # 当前构建目标安装包
+    ├── zotero-superior-intelligence-1.1.3.xpi  # 当前构建目标安装包
     ├── zotero-superior-intelligence-1.1.1.xpi  # 本地修订回退包
     ├── zotero-superior-intelligence-1.1.0.xpi  # 上一发布版本回退包
     ├── zotero-superior-intelligence-1.0.0.xpi  # 原始旧版安装包
@@ -184,7 +186,7 @@ zotero-superior-intelligence/
 
 ## 🧪 测试套件运行
 
-`npm run test:all` 包含 19 个测试脚本，覆盖模拟 Zotero 环境下的任务、恢复、网络与保存逻辑，以及真实无头浏览器中的文献库界面。首次运行先执行 `npm install` 和 `npx playwright install chromium`；也可通过 `CHROME_PATH` 指定系统 Chrome。这些测试不替代真实 Zotero 和真实 API 联调。
+`npm run test:all` 包含 21 个测试脚本，覆盖模拟 Zotero 环境下的任务、恢复、网络与保存逻辑，以及真实无头浏览器中的工作台和文献库界面。首次运行先执行 `npm install` 和 `npx playwright install chromium`；也可通过 `CHROME_PATH` 指定系统 Chrome。这些测试不替代真实 Zotero 和真实 API 联调。
 
 ```bash
 # 执行核心冒烟测试

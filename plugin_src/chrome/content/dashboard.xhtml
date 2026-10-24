@@ -27,6 +27,13 @@
     #mineru-dashboard-content #si-summary:hover { background: #254c83; }
     #mineru-dashboard-content :is(button, select, textarea):focus-visible { outline: 2px solid #3979ce; outline-offset: 3px; }
     .mineru-prompt-controls select { padding: 7px 10px; min-width: 180px; max-width: 100%; }
+    #si-prompt-preset-description { flex-basis: 100%; color: #627086; font-size: 12px; }
+    #si-prompt-preset-box[hidden], #si-job-status[hidden] { display: none; }
+    #si-job-status { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 12px 14px; border: 1px solid #dce6f2; border-radius: 8px; background: #f3f7fc; }
+    #si-job-message { flex: 1; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
+    #si-job-details { flex-shrink: 0; }
+    #si-job-status[data-status="completed"] { background: #f0f8f5; border-color: #cfe5dc; }
+    #si-job-status[data-status="failed"], #si-job-status[data-status="partial"], #si-job-status[data-status="paused"] { background: #fff8ef; border-color: #eddcc3; }
     #si-summary-prompt { display: block; width: 100%; min-height: 140px; margin-top: 12px; padding: 12px 14px; resize: vertical; line-height: 1.75; }
     #mineru-dashboard-result { min-height: 100px; max-height: 350px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #e8edf3; overflow: auto; line-height: 1.8; }
     #mineru-dashboard-result:empty::before { content: "生成的文献总结将在这里显示，并自动保存为笔记。"; display: block; padding: 24px 12px; text-align: center; font-size: 12px; color: #627086; background: #f8fafc; border-radius: 8px; }
@@ -99,6 +106,11 @@
         <html:button id="si-prompt-reset" type="button">恢复预设提示词</html:button>
         <html:button id="si-prompt-save" type="button">保存提示词</html:button>
       </html:div>
+      <html:div id="si-prompt-preset-box" class="mineru-prompt-controls">
+        <html:label for="si-prompt-preset">总结角度</html:label>
+        <html:select id="si-prompt-preset" aria-describedby="si-prompt-preset-description"></html:select>
+        <html:span id="si-prompt-preset-description"></html:span>
+      </html:div>
       <html:textarea id="si-summary-prompt" aria-label="总结提示词"></html:textarea>
       <html:p id="si-action-help">预设提示词要求中文学术表达；专业术语首次出现可附英文。生成的结果会自动保存为当前文献的子笔记。</html:p>
       <html:div id="si-highlight-legend" hidden="hidden" aria-label="高亮颜色分类">
@@ -108,6 +120,10 @@
         <html:button id="si-summary" type="button">生成并保存到文献笔记</html:button>
         <html:button id="si-batch-stop" type="button" hidden="hidden">暂停任务</html:button>
         <html:button id="si-batch-resume" type="button" hidden="hidden">继续批处理</html:button>
+      </html:div>
+      <html:div id="si-job-status" hidden="hidden">
+        <html:span id="si-job-message" role="status" aria-live="polite"></html:span>
+        <html:button id="si-job-details" type="button">查看任务详情</html:button>
       </html:div>
       <html:div id="mineru-dashboard-result" aria-live="polite"></html:div>
     </html:section>
