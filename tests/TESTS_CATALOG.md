@@ -53,3 +53,9 @@ npm run test:all
 # 或单项运行冒烟测试
 node tests/smoke.js
 ```
+
+## 科研写作知识库（1.2.0）
+
+`writing_knowledge.js`：原文核验、SQLite、去重审核、Voyage 与批处理/导出。`writing_ui.js`：浏览器交互、审核编辑、定位与布局。
+
+2.0.0：`writing_topics.js` 验证旧版迁移、事务回滚、固定 ID、归档/回收站、合并/移动、历史和分页；浏览器测试扩展到主题编辑、合并、恢复和窄屏布局。

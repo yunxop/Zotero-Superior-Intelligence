@@ -1,0 +1,47 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),os=require('node:os');
+const {DatabaseSync}=require('node:sqlite');
+(async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'si-topics-')),filename=path.join(dir,'writing.sqlite');
+ const db=new DatabaseSync(filename);
+ db.exec('CREATE TABLE writing_records (id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL); CREATE TABLE writing_notes (id TEXT PRIMARY KEY, noteID INTEGER NOT NULL)');
+ const record={id:'r1',status:'approved',topic:'Old topic',topics:['Old topic','Shared'],kind:'evidence',quote:'Original scientific statement.',source:{libraryID:1,attachmentKey:'PDF',title:'Paper',page:1},details:{explanation:'reviewed'},originalDetails:{explanation:'model'},reviewerNote:'verified'};
+ db.prepare('INSERT INTO writing_records VALUES (?,?,?)').run('r1','approved',JSON.stringify(record));
+ db.prepare('INSERT INTO writing_notes VALUES (?,?)').run('1:PDF:Old topic',99);db.close();
+ class DB{constructor(){this.d=new DatabaseSync(filename);this.chain=Promise.resolve();}async queryAsync(sql,args=[]){const s=this.d.prepare(sql);return /^SELECT/.test(sql)?s.all(...args):s.run(...args);}executeTransaction(fn){this.chain=this.chain.catch(()=>{}).then(async()=>{this.d.exec('BEGIN');try{await fn();this.d.exec('COMMIT');}catch(e){this.d.exec('ROLLBACK');throw e;}});return this.chain;}async closeDatabase(){this.d.close();}}
+ const ctx=vm.createContext({console,PathUtils:path,IOUtils:{makeDirectory:p=>fs.promises.mkdir(p,{recursive:true}),writeUTF8:(p,v)=>fs.promises.writeFile(p,v)},Zotero:{DBConnection:DB,DataDirectory:{dir}}});
+ for(const name of ['task_checkpoints','writing_core','writing_store','writing_topics'])vm.runInContext(fs.readFileSync('plugin_src/chrome/content/scripts/'+name+'.js','utf8'),ctx);
+ const store=ctx.SIWritingStore;await store.open();
+ let topics=await store.listTopics({state:'all'});assert.equal(topics.total,2);
+ const original=topics.topics.find(t=>t.name==='Old topic'),shared=topics.topics.find(t=>t.name==='Shared');
+ assert.equal(original.count,1);assert.equal(original.papers,1);assert.equal(original.pending,0);
+ assert.equal(await store.noteID('1:PDF:'+original.id),99);
+ assert.equal(JSON.parse((await store.db.queryAsync('SELECT data FROM writing_legacy_records'))[0].data).reviewerNote,'verified');
+ await store.saveTopic({id:original.id,name:'Renamed',description:'Cooling evidence',instruction:'Extract methods and limitations',folder:'Climate/Heat/Trees',tags:['thesis','review'],pinned:true});
+ let r=(await store.records())[0];assert.ok(r.topics.includes('Renamed'));assert.equal(r.topic,'Old topic');assert.equal(r.status,'approved');assert.equal(r.details.explanation,'reviewed');
+ assert.equal((await store.listTopics({query:'Old topic'})).total,1);assert.equal((await store.listTopics({folder:'Climate/Heat',tag:'thesis'})).total,1);
+ await assert.rejects(store.saveTopic({id:original.id,name:'Shared'}),/同名/);
+ await assert.rejects(store.saveTopic({id:original.id,folder:'a/b/c/d'}),/三层/);
+ assert.equal((await store.topicByID(original.id)).name,'Renamed');
+ await store.saveTopic({id:original.id,archived:true});assert.equal((await store.listTopics({state:'active'})).total,1);assert.equal((await store.listTopics({state:'archived'})).total,1);
+ await store.deleteTopic(original.id);assert.equal((await store.listTopics({state:'trash'})).total,1);assert.equal((await store.records()).length,1);
+ await store.saveTopic({id:original.id,deletedAt:null,archived:false});assert.ok((await store.records())[0].topics.includes('Renamed'));
+ await store.linkRecords(['r1'],original.id,null,'unlink');assert.ok(!(await store.records())[0].topicIds.includes(original.id));assert.ok((await store.records())[0].topicIds.includes(shared.id));
+ await store.linkRecords(['r1'],null,original.id,'link');assert.equal((await store.records())[0].topicIds.length,2);
+ const target=await store.saveTopic({name:'Destination',instruction:'Study results'});
+ await store.linkRecords(['r1'],shared.id,target.id,'move');assert.ok(!(await store.records())[0].topicIds.includes(shared.id));
+ await store.saveBatch({id:'batch1',topicID:original.id,topicName:'Renamed',instruction:'Old frozen instruction',status:'completed',startedAt:'2026-10-25',itemIDs:[1],recordIDs:['r1']});
+ await store.mergeTopics(original.id,target.id);
+ assert.equal((await store.records())[0].topicIds.length,1);assert.equal((await store.records())[0].topicIds[0],target.id);
+ assert.ok((await store.topicByID(target.id)).aliases.includes('Renamed'));
+ assert.equal((await store.batches(target.id)).batches[0].topicName,'Renamed');
+ assert.equal((await store.batches(target.id)).batches[0].instruction,'Old frozen instruction');
+ await assert.rejects(store.saveTopic({id:original.id,deletedAt:null}),/合并/);
+ await store.saveBatch({id:'interrupted',topicID:target.id,status:'running'});
+ await store.close();await store.open();assert.equal((await store.batches(target.id)).batches.find(b=>b.id==='interrupted').status,'interrupted');
+ assert.equal((await store.records())[0].topicIds[0],target.id); // migration does not resurrect old links
+ const migrationRows=await store.db.queryAsync('SELECT data FROM writing_legacy_records');assert.equal(migrationRows.length,1);
+ for(let i=0;i<35;i++)await store.saveTopic({name:'Empty '+String(i).padStart(2,'0')});
+ const page=await store.listTopics({query:'Empty',sort:'name',offset:30,limit:30});assert.equal(page.total,35);assert.equal(page.topics.length,5);assert.equal(page.topics[0].name,'Empty 30');
+ await store.remove(['r1']);assert.equal((await store.records()).length,0);await store.close();await store.open();assert.equal((await store.records(true)).length,1);await store.remove(['r1'],true);assert.equal((await store.records())[0].status,'approved');
+ await store.close();console.log('Topic management passed: legacy migration/backup, stable IDs, rename, tags/folders, archive/trash, links/moves/merge, history and pagination.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

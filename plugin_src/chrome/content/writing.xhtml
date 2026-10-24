@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<window id="si-writing-window" title="SI · 科研写作知识库" width="1180" height="850" windowtype="zoteromineru:writing"
+ xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" xmlns:html="http://www.w3.org/1999/xhtml">
+ <script src="chrome://zotero/content/include.js"/>
+ <script src="chrome://zoteromineru/content/scripts/writing_topic_ui.js"/>
+ <script src="chrome://zoteromineru/content/scripts/writing_ui.js"/>
+ <html:style>
+ #writing { height:100%; overflow:auto; padding:24px; background:#f4f7fb; color:#223249; font:14px/1.6 system-ui; color-scheme:light; }
+ #writing [hidden] { display:none !important; }
+ #writing * { box-sizing:border-box; } #writing h1 { margin:0; font-size:26px; } #writing h2 { font-size:17px; margin:0 0 12px; }
+ #writing .layout { display:grid; grid-template-columns:290px minmax(0,1fr); gap:20px; margin-top:20px; }
+ #writing .card { background:white; border:1px solid #dce4ef; border-radius:12px; padding:18px; margin-bottom:14px; }
+ #writing label { display:block; margin:10px 0; } #writing input:not([type=checkbox]), #writing textarea, #writing select { width:100%; padding:8px; }
+ #writing button, #writing input, #writing textarea, #writing select { font:inherit; border:1px solid #b9c8db; border-radius:6px; background:white; color:inherit; }
+ #writing button { padding:7px 12px; cursor:pointer; margin:3px; } #writing button:disabled { opacity:.5; cursor:default; }
+ #writing .primary { background:#315f9c; color:white; } #writing .muted { color:#60718a; font-size:12px; }
+ #writing blockquote { border-left:3px solid #6e93c3; margin:12px 0; padding:10px 14px; background:#f3f6fb; white-space:pre-wrap; }
+ #writing .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; } #writing .row label { flex:1; min-width:100px; }
+ #writing-status { white-space:pre-wrap; } #writing-results { overflow-wrap:anywhere; } #writing textarea { min-height:80px; }
+ #writing .topic-layout { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+ #writing pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+ @media(max-width:800px) { #writing .layout, #writing .topic-layout { grid-template-columns:1fr; } }
+ </html:style>
+ <html:main id="writing">
+  <html:h1>科研写作知识库</html:h1><html:p class="muted">从 PDF 原文积累科学证据与英文表达 · 保留来源 · 人工审核 · 开放导出</html:p>
+  <html:div class="row"><html:button id="writing-manage">主题管理 / 回收站</html:button></html:div>
+  <html:section id="writing-manager" hidden="hidden"/>
+  <html:div class="layout" id="writing-workspace">
+   <html:aside>
+    <html:section class="card"><html:h2>主题与批量提取</html:h2>
+     <html:label>提取范围<html:select id="writing-scope"><html:option value="selected">当前选中的文献/PDF</html:option><html:option value="collection">当前分类及全部子分类</html:option><html:option value="library">当前文献库全部论文</html:option></html:select></html:label>
+     <html:p id="writing-selection" class="muted"/><html:button id="writing-select">读取 Zotero 当前范围</html:button>
+     <html:p class="muted">跨子分类提取：先在 Zotero 点击共同的父分类，再选择“当前分类及全部子分类”。同一文献重复归类只处理一次；每篇默认读取主 PDF。读取范围后显示实际 PDF 数量，再点击开始。</html:p>
+     <html:label>主题名称<html:input id="writing-topic" placeholder="例如 城市植被降温"/></html:label>
+     <html:p id="writing-topic-active" class="muted">新主题：开始时自动创建</html:p><html:button id="writing-new-topic">使用新主题</html:button>
+     <html:label>本次提取指令<html:textarea id="writing-instruction" placeholder="提取定量降温证据，保留季节、气候区和研究局限；留空则使用主题默认指令。"/></html:label>
+     <html:label><html:input id="writing-semantic" type="checkbox" checked="checked"/> Voyage 语义 + 关键词筛选</html:label>
+     <html:label>每篇最多分析段落<html:input id="writing-limit" type="number" min="1" max="100" value="20"/></html:label>
+     <html:label>最低相关性（0–1）<html:input id="writing-threshold" type="number" min="0" max="1" step="0.05" value="0.2"/></html:label>
+     <html:label><html:input id="writing-notes" type="checkbox" checked="checked"/> 自动生成 Zotero 子笔记</html:label>
+     <html:p class="muted">开始提取会将 PDF 段落发送给 Voyage，并将筛选出的段落发送给当前 SI 大模型。关闭窗口后任务继续。</html:p>
+     <html:button id="writing-start" class="primary">开始提取</html:button><html:button id="writing-stop" disabled="disabled">停止</html:button>
+    </html:section>
+    <html:section class="card"><html:h2>Voyage AI 设置</html:h2>
+     <html:label>API Key<html:input id="writing-key" type="password" autocomplete="off"/></html:label>
+     <html:label>Embedding 模型<html:input id="writing-model" value="voyage-4-lite"/></html:label>
+     <html:button id="writing-save">保存设置</html:button><html:p class="muted">大模型使用 SI 当前配置。更换 Embedding 模型后重新提取以更新语义索引。</html:p>
+    </html:section>
+   </html:aside>
+   <html:section>
+    <html:div class="card"><html:h2>跨论文检索与审核</html:h2>
+     <html:label>查找主题<html:input id="writing-topic-query" type="search" placeholder="输入名称、别名或标签"/></html:label><html:button id="writing-find-topic">查找主题</html:button>
+     <html:p class="muted">默认列出置顶和最近使用的 20 个主题；更多主题可搜索或打开主题管理。</html:p>
+     <html:label>历史提取主题<html:select id="writing-history"><html:option value="">全部主题</html:option></html:select></html:label>
+     <html:label>搜索原文、主题、中文解释或论文标题<html:input id="writing-query" type="search"/></html:label>
+     <html:div class="row">
+      <html:label>审核状态<html:select id="writing-status-filter"><html:option value="">全部</html:option><html:option value="pending">待审核</html:option><html:option value="approved">已通过</html:option><html:option value="rejected">已拒绝</html:option></html:select></html:label>
+      <html:label>类型<html:select id="writing-kind"><html:option value="">全部</html:option><html:option value="evidence">科学证据</html:option><html:option value="expression">英文表达</html:option></html:select></html:label>
+      <html:label>章节<html:select id="writing-section"><html:option value="">全部</html:option><html:option>Introduction</html:option><html:option>Methods</html:option><html:option>Results</html:option><html:option>Discussion</html:option><html:option>Other</html:option></html:select></html:label>
+     </html:div>
+     <html:label><html:input id="writing-search-semantic" type="checkbox"/> 语义匹配（查询会发送至 Voyage）</html:label>
+     <html:button id="writing-search" class="primary">搜索 / 刷新</html:button>
+     <html:div class="row"><html:button id="writing-markdown">导出 Markdown</html:button><html:button id="writing-jsonl">导出 Agent JSONL</html:button><html:button id="writing-training">导出微调 JSONL</html:button></html:div>
+     <html:p class="muted">导出应用历史主题、状态、类型与章节筛选，包含所有匹配记录，不受搜索词与显示数量限制。微调只导出已通过记录。文件保存到 Zotero 数据目录下 si-writing 文件夹。</html:p>
+     <html:p id="writing-status" role="status" aria-live="polite"/><html:p id="writing-count" class="muted"/><html:button id="writing-prev">上一页</html:button><html:button id="writing-next">下一页</html:button>
+    </html:div>
+    <html:div class="card">
+     <html:p class="muted">待审核：尚未核验；已通过：确认可用，可进入微调导出；已拒绝：保留但不进入微调导出。普通导出仍按所选筛选条件包含记录。</html:p>
+     <html:label><html:input id="writing-select-all" type="checkbox"/> 选择本页记录</html:label>
+     <html:button id="writing-copy-selected">复制选中原句</html:button><html:button id="writing-unlink-selected">从本主题移除</html:button><html:button id="writing-delete-selected">从知识库删除</html:button>
+     <html:label>查找关联/移动目标主题<html:input id="writing-target-query" placeholder="主题名称或标签"/></html:label><html:button id="writing-target-find">查找目标</html:button>
+     <html:select id="writing-target" aria-label="目标主题"/>
+     <html:button id="writing-link-selected">关联到目标主题</html:button><html:button id="writing-move-selected">移动到目标主题</html:button><html:button id="writing-undo" disabled="disabled">撤销上次删除</html:button>
+     <html:p class="muted">删除会从所有主题、检索和后续导出中移除该记录，可撤销。已有 Zotero 笔记和导出文件是快照，不会随之删除。</html:p>
+    </html:div>
+    <html:div id="writing-results"/>
+   </html:section>
+  </html:div>
+ </html:main>
+</window>

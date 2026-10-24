@@ -8,6 +8,7 @@
   window.addEventListener("load", () => {
     const app = Zotero.MinerUAI;
     document.getElementById("si-library-chat")?.addEventListener("click", () => app.openLibraryChat());
+    document.getElementById("si-writing-knowledge")?.addEventListener("click", () => app.openWritingKnowledge());
     const args = window.arguments?.[0];
     window.siSelectedItemID = args?.wrappedJSObject?.selectedItemID || args?.selectedItemID || null;
     const status = document.getElementById("mineru-dashboard-status");

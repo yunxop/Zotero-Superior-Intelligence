@@ -178,6 +178,16 @@ var ZoteroMinerUAI = {
     Zotero.getMainWindow()?.openDialog("chrome://zoteromineru/content/library.xhtml", "zoteromineru-library", "chrome,titlebar,centerscreen,resizable=yes");
   },
 
+  openWritingKnowledge() {
+    const existing = Services.wm.getMostRecentWindow("zoteromineru:writing");
+    if (existing && !existing.closed) { existing.focus(); return; }
+    Zotero.getMainWindow()?.openDialog("chrome://zoteromineru/content/writing.xhtml", "zoteromineru-writing", "chrome,titlebar,centerscreen,resizable=yes");
+  },
+
+  // Public in-process API; no unauthenticated network listener is opened.
+  get writingKnowledge() { return SIWriting; },
+  reviewWritingRecord(id, status, note, details) { return SIWritingStore.review(id, status, note, details); },
+
   libraryCall(action, payload, onEvent) { return SILibraryChat.call(action, payload, onEvent); },
   stopLibraryTask(id) { SILibraryChat.stop(id); },
 
@@ -885,7 +895,8 @@ var ZoteroMinerUAI = {
     this.taskControllers.clear();
     if (typeof SummaryTextCache !== "undefined") SummaryTextCache.clear();
     if (typeof SILibraryChat !== "undefined") SILibraryChat.destroy();
-    for (const windowType of ["zoteromineru:library", "zoteromineru:dashboard"]) {
+    if (typeof SIWriting !== "undefined") await SIWriting.destroy();
+    for (const windowType of ["zoteromineru:library", "zoteromineru:dashboard", "zoteromineru:writing"]) {
       const assistantWindow = Services.wm.getMostRecentWindow(windowType);
       if (assistantWindow && !assistantWindow.closed) assistantWindow.close();
     }

@@ -53,7 +53,7 @@ prefs.set('extensions.zoteromineru.taskSettings','broken JSON');assert.equal(loa
  const app=ctx.ZoteroMinerUAI;const signal=app.beginTask('shutdown');app.initialized=true;
  await app.destroy();
  assert.equal(signal.aborted,true);assert.equal(app.taskControllers.size,0);
- assert.deepEqual(closed,['zoteromineru:library','zoteromineru:dashboard']);assert.equal(ctx.Zotero.MinerUAI,undefined);
+ assert.deepEqual(closed,['zoteromineru:library','zoteromineru:dashboard','zoteromineru:writing']);assert.equal(ctx.Zotero.MinerUAI,undefined);
  assert.deepEqual(hooks,['text','library','reader']);
  console.log('task settings passed: persistent global thinking, per-task limits, reopen, task type, cancellation and shutdown cleanup');
 })().catch(error=>{console.error(error);process.exitCode=1;});

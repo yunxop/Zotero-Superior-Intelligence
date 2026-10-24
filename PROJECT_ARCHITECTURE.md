@@ -12,7 +12,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | `README.md` | 开源门户主页 | GitHub 项目主页，提供中英双语介绍、特性矩阵、安装与配置指南 | 项目全景信息 | 开发者与用户第一入口 |
 | `LICENSE` | 开源许可协议 | AGPL-3.0 开源协议文本，规范开源衍生与权利声明 | 开源法律规范 | 法律使用许可 |
-| `package.json` | 工程元数据配置 | 声明包名、版本号（v1.1.3）与常用 npm 脚本快捷指令 | 项目元数据 | npm 运行配置与元数据 |
+| `package.json` | 工程元数据配置 | 声明包名、版本号（v2.0.0）与常用 npm 脚本快捷指令 | 项目元数据 | npm 运行配置与元数据 |
 | `update.json` | 自动更新元数据清单 | 声明供 Zotero 客户端自动轮询检测最新版本与 XPI 下载链接 | 版本号与 Release 下载地址 | Zotero 自动更新检测数据源 |
 | `.gitignore` | 版本控制忽略规则 | 排除中间编译安装包、第三方反编译源码、Python/Node 缓存与敏感凭证 | 文件路径规则 | 纯净的 Git 代码树 |
 | `.github/` | CI/CD 持续集成 | 包含 GitHub Actions 自动化工作流，每次 Push/PR 自动测试与打包 | 仓库代码变动 | 自动化测试报告与 XPI 产物 |
@@ -58,3 +58,9 @@
  │ - 在右侧抽屉流式输出学术洞见、方法提取与中文精读       │
  └────────────────────────────────────────────────────────┘
 ```
+
+## 科研写作知识库
+
+`writing_core.js` 负责 PDF 段落解析、原文核验与导出格式；`writing_store.js` 管理独立 SQLite 与 Markdown 镜像；`writing_service.js` 编排 Voyage/LLM、后台批处理、检索和笔记；`writing_ui.js` 与 `writing.xhtml` 提供审核工作台。入口为 SI 工作台中的“科研写作知识库”。详见 [功能与接口说明](docs/writing-knowledge.md)。
+
+2.0.0 新增 `writing_topics.js`（固定主题 ID、迁移、主题/记录操作与批次历史）和 `writing_topic_ui.js`（独立主题管理界面）。主题元数据在 `writing_topics`，提取参数快照在 `writing_batches`，旧版记录备份在 `writing_legacy_records`；迁移版本由 `writing_meta` 管理。

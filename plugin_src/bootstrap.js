@@ -73,7 +73,7 @@ async function startup({ rootURI }, reason) {
       `${rootURI}chrome/content/scripts/batch.js`,
       { target: ctx, ignoreCache: true }
     );
-    for (const script of ["library_index.js", "library_chat.js", "summary_text_cache.js"]) {
+    for (const script of ["library_index.js", "library_chat.js", "summary_text_cache.js", "writing_core.js", "writing_store.js", "writing_topics.js", "writing_service.js"]) {
       Services.scriptloader.loadSubScriptWithOptions(`${rootURI}chrome/content/scripts/${script}`, { target: ctx, ignoreCache: true });
     }
     Services.scriptloader.loadSubScriptWithOptions(

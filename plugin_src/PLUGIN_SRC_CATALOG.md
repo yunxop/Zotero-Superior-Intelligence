@@ -34,3 +34,9 @@
 | `chrome/locale/` | 本地化语言包 | 包含中英文（zh-CN, en-US）多语言界面定义 | 语言包文本 | 本地化 UI 提示 |
 
 
+
+## 科研写作知识库（1.2.0）
+
+新增 `writing_core.js`、`writing_store.js`、`writing_service.js`、`writing_ui.js` 与 `writing.xhtml`。功能、存储与接口见 `docs/writing-knowledge.md`。
+
+2.0.0：新增 `writing_topics.js` 与 `writing_topic_ui.js`，负责主题迁移、管理、记录关联和提取历史。
