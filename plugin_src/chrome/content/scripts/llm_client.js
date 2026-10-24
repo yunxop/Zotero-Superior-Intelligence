@@ -43,7 +43,7 @@ var LLMClient = {
   resumeIdentity(source, prompt, config = {}) {
     const cache = typeof TaskCheckpointCache !== "undefined" ? TaskCheckpointCache : null;
     return {
-      version: 1, kind: "paper-summary", chunkLimit: 45000,
+      version: 2, kind: "paper-summary", chunkLimit: 45000,
       sourceHash: cache ? cache.hashText(source) : null,
       promptHash: cache ? cache.hashText(prompt) : null,
       apiBase: String(config.llmApiBase || "").trim().replace(/\/+$/, ""),
@@ -136,47 +136,96 @@ var LLMClient = {
     let answer = "";
     let usage = null;
     let finishReason = null;
+    let streamingResponse = false;
+    const acceptPart = part => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) throw new Error("模型返回了无效的响应数据，未保存本次结果。");
+      if (part.usage) usage = part.usage;
+      if (part.error) {
+        const detail = typeof part.error === "string" ? part.error : part.error.message || part.error.code || "未知错误";
+        throw new Error(`模型返回错误：${String(detail).slice(0, 400)}。未保存本次结果。`);
+      }
+      const choice = part.choices?.find(candidate => candidate.index == null || candidate.index === 0);
+      if (choice?.finish_reason != null) {
+        if (finishReason != null && finishReason !== choice.finish_reason) throw new Error("模型返回了不一致的结束状态，未保存本次结果。");
+        finishReason = choice.finish_reason;
+      }
+      return choice;
+    };
     const contentType = response.headers?.get?.("content-type") || "";
     if (stream && response.body?.getReader && !contentType.includes("application/json")) {
+      streamingResponse = true;
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
-      const consume = (line) => {
-        if (!line.startsWith("data:")) return;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") return;
+      let eventData = [], eventType = "", ended = false, readerDone = false, readerCancelled = false;
+      const cancelReader = () => {
+        if (readerCancelled || readerDone) return;
+        readerCancelled = true;
+        try { Promise.resolve(reader.cancel()).catch(() => {}); } catch (_error) {}
+      };
+      const dispatch = () => {
+        const payload = eventData.join("\n").trim();
+        const type = eventType;
+        eventData = []; eventType = "";
+        if (type === "error") throw new Error(`模型流式响应错误：${payload.slice(0, 400) || "未知错误"}。未保存本次结果。`);
+        if (!payload) return;
+        if (payload === "[DONE]") { ended = true; return; }
         let part;
-        try { part = JSON.parse(payload); } catch (_error) { return; }
-        if (part.usage) usage = part.usage;
-        if (part.choices?.[0]?.finish_reason) finishReason = part.choices[0].finish_reason;
-        const delta = part.choices?.[0]?.delta?.content || "";
+        try { part = JSON.parse(payload); } catch (_error) { throw new Error("模型流式响应格式损坏，未保存本次结果。请检查接口兼容性后重试。"); }
+        const choice = acceptPart(part);
+        const delta = choice?.delta?.content || "";
+        if (typeof delta !== "string") throw new Error("模型返回了无效的正文片段，未保存本次结果。");
         if (delta) { answer += delta; onStream(delta, answer); }
       };
-      try {
-        while (true) {
+      const consume = line => {
+        if (!line) { dispatch(); return; }
+        if (line.startsWith(":")) return;
+        const separator = line.indexOf(":");
+        const field = separator < 0 ? line : line.slice(0, separator);
+        const value = separator < 0 ? "" : line.slice(separator + 1).replace(/^ /, "");
+        if (field === "data") eventData.push(value);
+        else if (field === "event") eventType = value;
+      };
+      const consumeBuffer = flush => {
+        // Handle LF, CRLF, and CR delimiters even when CRLF spans transport chunks.
+        while (!ended) {
+          const match = /[\r\n]/.exec(buffer);
+          if (!match || (!flush && match.index === buffer.length - 1 && match[0] === "\r")) break;
+          const index = match.index;
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + (buffer[index] === "\r" && buffer[index + 1] === "\n" ? 2 : 1));
           this.throwIfAborted(signal);
-          const { done, value } = await this.awaitWithSignal(reader.read(), signal, () => reader.cancel());
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop();
-          for (const line of lines) { this.throwIfAborted(signal); consume(line); }
+          consume(line);
         }
-        buffer += decoder.decode();
-        if (buffer) consume(buffer);
+      };
+      try {
+        while (!ended) {
+          this.throwIfAborted(signal);
+          const { done, value } = await this.awaitWithSignal(reader.read(), signal, cancelReader);
+          if (done) { readerDone = true; break; }
+          buffer += decoder.decode(value, { stream: true });
+          consumeBuffer(false);
+        }
+        if (!ended) {
+          buffer += decoder.decode();
+          consumeBuffer(true);
+          if (buffer) consume(buffer);
+          dispatch();
+        }
       } finally {
+        cancelReader();
         try { reader.releaseLock(); } catch (_error) {}
       }
     } else {
       const data = await this.awaitWithSignal(response.json(), signal);
-      answer = data.choices?.[0]?.message?.content || "";
-      usage = data.usage || null;
-      finishReason = data.choices?.[0]?.finish_reason || null;
+      answer = acceptPart(data)?.message?.content || "";
+      if (typeof answer !== "string") throw new Error("模型返回了无效的正文，未保存本次结果。");
       if (answer) onStream(answer, answer);
     }
     this.throwIfAborted(signal);
     LLMUsage.record(usage, config.llmSlot || 1);
     onUsage(usage);
+    if (streamingResponse && !finishReason) throw new Error("模型流式响应提前结束，缺少有效的完成状态。未保存或缓存本次结果，请检查网络及接口后重试。");
     if (finishReason === "length") {
       if (allowPartial && answer.trim()) {
         onIncomplete();
@@ -184,6 +233,7 @@ var LLMClient = {
       }
       throw new Error("模型达到输出上限，但没有可保存的正文或结构化结果不完整。未写入高亮，Token 已计入统计。可调整输出上限后重试。");
     }
+    if (finishReason != null && finishReason !== "stop") throw new Error(`模型未正常完成回答（结束状态：${String(finishReason).slice(0, 80)}），未保存或缓存本次结果。`);
     if (!answer) throw new Error("模型没有返回内容，请检查模型名称及接口地址。");
     return answer;
   },

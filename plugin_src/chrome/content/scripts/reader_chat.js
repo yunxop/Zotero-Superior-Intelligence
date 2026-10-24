@@ -10,6 +10,7 @@ var ReaderChat = {
   sessions: new Map(),
   textCache: new Map(),
   views: new Map(),
+  viewUpdates: new Map(),
 
   register() {
     Zotero.ftl.addResourceIds(["mineru.ftl"]);
@@ -54,6 +55,8 @@ var ReaderChat = {
     }
     Zotero.ftl.removeResourceIds(["mineru.ftl"]);
     for (const state of this.sessions.values()) state.controller?.abort();
+    for (const cleanup of this.viewUpdates.values()) cleanup();
+    this.viewUpdates.clear();
     this.sessions.clear();
     this.textCache.clear();
     this.views.clear();
@@ -96,13 +99,17 @@ var ReaderChat = {
   },
 
   releaseView(body) {
+    this.viewUpdates.get(body)?.();
+    this.viewUpdates.delete(body);
     const itemID = Number(body?.dataset?.siAttachmentId);
     if (!itemID) return;
     delete body.dataset.siAttachmentId;
     const views = this.views.get(itemID);
     if (!views) return;
     views.delete(body);
-    for (const view of views) if (view.isConnected === false) views.delete(view);
+    for (const view of views) if (view.isConnected === false) {
+      this.viewUpdates.get(view)?.(); this.viewUpdates.delete(view); views.delete(view);
+    }
     if (views.size) return;
     this.views.delete(itemID);
     const state = this.sessions.get(itemID);
@@ -118,10 +125,15 @@ var ReaderChat = {
   },
 
   render(doc, body) {
+    this.viewUpdates.get(body)?.();
+    this.viewUpdates.delete(body);
+    let live = true, pendingUpdate = null;
+    const cancelUpdate = () => { pendingUpdate?.cancel(); pendingUpdate = null; };
     body.replaceChildren();
     const attachment = this.attachmentForBody(body);
     if (!attachment) { this.releaseView(body); return; }
     this.bindView(body, attachment.id);
+    this.viewUpdates.set(body, () => { live = false; cancelUpdate(); });
     const state = this.session(attachment.id);
     const el = (tag, className, label) => {
       const node = doc.createElement(tag);
@@ -187,7 +199,7 @@ var ReaderChat = {
     const send = el("button", "mineru-chat-send", "发送问题");
     send.disabled = state.busy;
     const stop = el("button", "", "暂停回答"); stop.disabled = !state.busy;
-    stop.addEventListener("click", () => state.controller?.abort());
+    stop.addEventListener("click", () => { cancelUpdate(); state.controller?.abort(); });
     const save = el("button", "", "保存对话到文献笔记");
     save.disabled = !state.history.length || state.busy;
     const clear = el("button", "", "清空对话");
@@ -355,42 +367,54 @@ var ReaderChat = {
       input.value = "";
       addMessage("user", question);
       const answerHandle = addMessage("assistant", "正在读取 PDF…");
+      const paint = text => {
+        if (!live || body.isConnected === false || generation !== state.generation || controller.signal.aborted) return;
+        const top = log.scrollTop;
+        const follow = log.scrollHeight - top - log.clientHeight <= 48;
+        answerHandle.updateContent(text);
+        log.scrollTop = follow ? log.scrollHeight : top;
+      };
+      const updates = Zotero.MinerUAI.createUIUpdater(paint);
+      pendingUpdate = updates;
       try {
-        const fullText = await this.getPdfText(attachment, (message) => { if (generation === state.generation) status.textContent = message; }, { signal: controller.signal });
+        const fullText = await this.getPdfText(attachment, (message) => { if (live && generation === state.generation) status.textContent = message; }, { signal: controller.signal });
         if (controller.signal.aborted) { const error = new Error("回答已暂停。"); error.name = "AbortError"; throw error; }
         const context = this.selectContext(fullText, question);
-        status.textContent = "正在等待模型回答…";
+        if (live) status.textContent = "正在等待模型回答…";
         const answer = await LLMClient.chatWithPdf(
           context,
           [...state.history, { role: "user", content: question }],
           { ...Zotero.MinerUAI.getConfig("reader"), llmThinking: thinking, llmMaxTokens: Number(outputLimit.value) },
           (_delta, full) => {
             if (generation !== state.generation || controller.signal.aborted) return;
-            answerHandle.updateContent(full);
-            log.scrollTop = log.scrollHeight;
+            updates.push(full);
           }, { signal: controller.signal }
         );
         if (generation !== state.generation || controller.signal.aborted) return;
+        updates.cancel(); paint(answer);
         const assistantEntry = { role: "assistant", content: answer };
         state.history.push({ role: "user", content: question }, assistantEntry);
         answerHandle.attachHistory(assistantEntry);
-        status.textContent = "回答完成";
+        if (live) status.textContent = "回答完成";
       } catch (error) {
+        updates.cancel();
         if (generation !== state.generation) return;
         if (controller.signal.aborted || error?.name === "AbortError") {
-          status.textContent = "回答已暂停。问题已放回输入框，可调整后重新发送。";
-          input.value = question;
+          if (live) { status.textContent = "回答已暂停。问题已放回输入框，可调整后重新发送。"; input.value = question; }
         } else {
-          answerHandle.updateContent(`出错：${error.message}`);
-          status.textContent = "请检查 PDF 正文和模型设置";
+          if (live) { paint(`出错：${error.message}`); status.textContent = "请检查 PDF 正文和模型设置"; }
           Zotero.logError(error);
         }
       } finally {
+        updates.cancel(); if (pendingUpdate === updates) pendingUpdate = null;
         if (generation === state.generation) {
           state.busy = false; state.controller = null;
           send.disabled = false; stop.disabled = true;
           thinkingButton.disabled = false; outputLimit.disabled = false; profileSelect.disabled = false;
           save.disabled = !state.history.length;
+          // A pane may have been recreated while awaiting the model. Refresh its
+          // current view once, after committing the final history and state.
+          if (!live && body.isConnected !== false && Number(body.dataset.siAttachmentId) === attachment.id) this.render(doc, body);
         }
       }
     };
@@ -403,6 +427,7 @@ var ReaderChat = {
     });
     clear.addEventListener("click", () => {
       if (state.saving) return;
+      cancelUpdate();
       state.controller?.abort(); state.controller = null;
       state.generation += 1; state.busy = false;
       state.history = []; state.noteID = null;

@@ -11,12 +11,40 @@ var ZoteroMinerUAI = {
   paneId: null,
   taskControllers: new Map(),
   summarySaveLocks: new Map(),
+  dashboardJob: null,
+  dashboardSubscribers: new Set(),
+  shuttingDown: false,
+
+  // Render the first update immediately, then only the latest value per interval.
+  // Callers flush on completion and cancel before clearing or disposing their UI.
+  createUIUpdater(callback, intervalMs = 200) {
+    let latest = null, timer = null, last = null, cancelled = false;
+    const clear = () => { if (timer !== null) clearTimeout(timer); timer = null; };
+    const flush = () => {
+      clear();
+      if (cancelled || !latest) return;
+      const args = latest; latest = null; last = Date.now();
+      callback(...args);
+    };
+    return {
+      push(...args) {
+        if (cancelled) return;
+        latest = args;
+        const remaining = last === null ? 0 : intervalMs - (Date.now() - last);
+        if (remaining <= 0) flush();
+        else if (timer === null) timer = setTimeout(flush, remaining);
+      },
+      flush,
+      cancel() { cancelled = true; latest = null; clear(); }
+    };
+  },
 
   /**
    * 初始化核心控制器并注册系统服务
    */
   async init({ rootURI }) {
     if (this.initialized) return;
+    this.shuttingDown = false;
     this.rootURI = rootURI;
     this.initialized = true;
 
@@ -305,6 +333,163 @@ var ZoteroMinerUAI = {
     if (signal?.aborted) { const error = new Error("任务已暂停；已完成的分段保留，继续时会复用。"); error.name = "AbortError"; throw error; }
   },
 
+  // The bootstrap compartment owns execution. Windows exchange JSON snapshots
+  // and subscribe only while open; no window promise or DOM is part of a job.
+  getDashboardJob() { return JSON.stringify(this.dashboardJob?.snapshot || null); },
+  getDashboardJobResults(id) {
+    const job = this.dashboardJob;
+    return JSON.stringify(job?.snapshot.id === id ? job.results : { result: null, items: [] });
+  },
+  subscribeDashboardJob(callback) {
+    this.dashboardSubscribers.add(callback);
+    try { callback(this.getDashboardJob()); }
+    catch (_) { this.dashboardSubscribers.delete(callback); }
+    return () => this.dashboardSubscribers.delete(callback);
+  },
+  publishDashboardJob(job, change = {}) {
+    Object.assign(job.snapshot, change);
+    job.snapshot.revision++;
+    if (this.shuttingDown || this.dashboardJob !== job) return;
+    const json = this.getDashboardJob();
+    for (const callback of this.dashboardSubscribers) {
+      try { callback(json); }
+      catch (_) { this.dashboardSubscribers.delete(callback); }
+    }
+  },
+  cancelDashboardJob(id) {
+    const job = this.dashboardJob;
+    if (!job || job.snapshot.id !== id || job.snapshot.status !== "running") return;
+    this.cancelTask(id);
+    this.publishDashboardJob(job, { cancelling: true, message: "正在暂停；已完成的分段会保留，稍后可继续任务。" });
+  },
+  startDashboardJob(inputJSON) {
+    if (this.shuttingDown) throw new Error("插件正在关闭，无法启动任务。");
+    if (this.dashboardJob?.snapshot.status === "running") throw new Error("已有任务正在后台运行，请等待完成或先暂停。");
+    // Parsing here also prevents retention of objects from a closing window.
+    const input = JSON.parse(inputJSON);
+    const ids = [...new Set((input.ids || []).filter(id => Number.isInteger(id) && id > 0))];
+    if (!ids.length) throw new Error("请先在文献列表中选择条目。");
+    if (!["summary", "extract"].includes(input.kind)) throw new Error("不支持的任务类型。");
+    if (input.kind !== "extract" && !["paper_summary", "table_summary", "auto_highlight"].includes(input.type)) throw new Error("不支持的任务类型。");
+    if (input.kind === "extract") ids.splice(1);
+    const kind = input.kind === "extract" ? "extract" : ids.length > 1 ? "batch" : "single";
+    const id = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const job = { snapshot: { id, kind, ids, type: input.type, status: "running", cancelling: false,
+      title: kind === "extract" ? "正在提取 PDF 正文" : kind === "batch" ? "正在批量处理文献" : input.type === "auto_highlight" ? "正在标记文献" : "正在生成总结",
+      message: "任务已开始，正在读取文献。", hint: "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
+      rows: ids.map(itemID => ({ itemID, status: "queued" })), revision: 0, resultRevision: 0 },
+      results: { result: null, items: [] } };
+    const signal = this.beginTask(id);
+    this.dashboardJob = job;
+    // Always start from this compartment's microtask, even if the caller closes
+    // its window immediately after the synchronous launch returns.
+    this.dashboardRun = Promise.resolve().then(() => this.executeDashboardJob(job, input, signal));
+    this.publishDashboardJob(job);
+    return this.getDashboardJob();
+  },
+  retainDashboardResult(job, result, itemEvent = null) {
+    // Notes/annotations retain full results. Only the latest previews stay in
+    // memory; large batches must not accumulate unbounded rendered content.
+    if (itemEvent) {
+      job.results.items.push(itemEvent);
+      if (job.results.items.length > 50) job.results.items.shift();
+    } else job.results.result = result;
+    let size = JSON.stringify(job.results).length;
+    for (const entry of job.results.items) {
+      if (size <= 2 * 1024 * 1024) break;
+      if (entry.result) { size -= JSON.stringify(entry.result).length; delete entry.result; entry.previewOmitted = true; }
+    }
+    job.snapshot.resultRevision++;
+  },
+  async executeDashboardJob(job, input, signal) {
+    const { ids, kind, type, id } = job.snapshot;
+    let taskID = null, lastStage = "准备任务";
+    const row = (itemID, status) => {
+      const entry = job.snapshot.rows.find(entry => entry.itemID === itemID);
+      if (entry) entry.status = status;
+    };
+    const report = message => {
+      this.checkTaskSignal(signal);
+      lastStage = message;
+      if (taskID) this.updateSummaryTask(taskID, { stage: message });
+      this.publishDashboardJob(job, { message });
+    };
+    try {
+      const config = input.config || this.getConfig(type), prompt = String(input.prompt || "");
+      this.checkTaskSignal(signal);
+      if (kind === "batch") {
+        const totals = JSON.parse(await this.runBatch(ids, type, config, prompt, json => {
+          const event = JSON.parse(json);
+          if (event.kind === "progress") {
+            row(event.itemID, "running");
+            this.publishDashboardJob(job, { message: `[${event.index}/${event.total}] ${event.title}\n${event.message}` });
+          } else if (event.kind === "item") {
+            row(event.itemID, event.status);
+            this.retainDashboardResult(job, null, event);
+            this.publishDashboardJob(job);
+          }
+        }, () => signal.aborted, { id, signal }));
+        this.publishDashboardJob(job, {
+          status: totals.stopped ? "paused" : totals.failed ? "failed" : totals.partial ? "partial" : "completed",
+          title: totals.stopped ? "批处理已停止" : "批处理已结束",
+          message: `成功 ${totals.completed} 篇 · 未完成并保存 ${totals.partial || 0} 篇 · 失败 ${totals.failed} 篇 · 重复跳过 ${totals.skipped} 篇 · 未执行 ${totals.stopped} 篇`,
+          hint: totals.stopped ? "已保留未完成队列，点击“继续批处理”即可续跑。" : "任务已结束；下方保留最近 50 篇结果预览，已保存的完整内容可在文献中查看。"
+        });
+        return;
+      }
+      const item = Zotero.Items.get(ids[0]);
+      if (!item || item.deleted) throw new Error("文献不存在或已删除。");
+      row(item.id, "running");
+      if (kind === "extract") {
+        const result = await this.handleExtractMarkdown(item, { id, signal, config, onProgress: report });
+        row(item.id, result.ok ? "completed" : result.cancelled ? "stopped" : "failed");
+        this.publishDashboardJob(job, { status: result.ok ? "completed" : result.cancelled ? "paused" : "failed",
+          title: result.ok ? "正文提取已完成" : result.cancelled ? "提取已取消" : "正文提取失败",
+          message: result.message, hint: "任务已结束；如需再次提取，可重新启动。" });
+        return;
+      }
+      const highlight = type === "auto_highlight";
+      if (!highlight) this.saveSummaryPrompt(type, prompt);
+      taskID = this.startSummaryTask({ title: (item.isAttachment?.() ? item.attachmentFilename : "") || item.getField?.("title") || "未命名文献",
+        promptType: type, profileSlot: config.llmSlot, itemID: item.id,
+        settings: { thinking: config.llmThinking, maxTokens: config.llmMaxTokens }, prompt });
+      report("正在读取文献…");
+      let message, incomplete = false;
+      if (highlight) {
+        const response = JSON.parse(await this.highlightItem(item, report, config, { signal }));
+        if (!response.ok) { const error = new Error(response.error || `失败阶段：${lastStage}；底层组件未提供错误详情`); error.cancelled = response.cancelled; throw error; }
+        const result = response.result;
+        message = result.count ? `已添加 ${result.count} 条高亮，本次标记约占可提取原文的 ${result.percent}%。` : "未新增高亮：没有通过原文、去重及比例检查的候选内容，或已达到标记上限。";
+        if (result.emptyPages) message += ` ${result.emptyPages} 页无文字层，仅分析可提取的原文。`;
+        this.retainDashboardResult(job, { ...result, message });
+        this.updateSummaryTask(taskID, { status: "completed", stage: message });
+      } else {
+        const result = await this.summarizeItem(item, type, report, config, prompt, { signal });
+        this.checkTaskSignal(signal);
+        report("正在保存文献笔记…");
+        const note = await this.saveSummary(result, { signal });
+        incomplete = !!result.incomplete;
+        this.updateSummaryTask(taskID, { status: incomplete ? "interrupted" : "completed", stage: incomplete ? "未完成：部分结果已保存" : "文献笔记已保存", noteID: note?.id || null });
+        this.retainDashboardResult(job, { markdown: result.markdown, incomplete });
+        message = (incomplete ? "未完成：已达到输出上限，部分结果已保存到笔记。" : "总结已生成并保存到当前文献笔记。") + (result.timings ? ` 正文准备 ${(result.timings.extractionMs / 1000).toFixed(1)} 秒${result.timings.cached ? "（复用）" : ""}，模型生成 ${(result.timings.modelMs / 1000).toFixed(1)} 秒。` : "");
+      }
+      row(item.id, incomplete ? "partial" : "completed");
+      this.publishDashboardJob(job, { status: incomplete ? "partial" : "completed", title: incomplete ? "未完成 · 部分结果已保存" : `${highlight ? "文献高亮" : "总结"}已完成`, message, hint: "任务已结束，可以关闭提示查看结果。" });
+    } catch (error) {
+      const paused = this.isTaskCancelled(error, signal);
+      const detail = paused ? "任务已暂停；已完成分段已保留，可在历史任务中点击“继续任务”。" : this.describeError(error);
+      const message = paused || detail.includes("失败阶段：") ? detail : `失败阶段：${lastStage}\n原因：${detail}`;
+      try { if (taskID) this.updateSummaryTask(taskID, { status: paused ? "interrupted" : "failed", stage: message }); }
+      catch (historyError) { try { Zotero.logError(historyError); } catch (_) {} }
+      for (const entry of job.snapshot.rows) if (["queued", "running"].includes(entry.status)) entry.status = paused ? "stopped" : "failed";
+      this.publishDashboardJob(job, { status: paused ? "paused" : "failed", title: paused ? "任务已暂停" : `${kind === "batch" ? "批处理" : kind === "extract" ? "正文提取" : type === "auto_highlight" ? "文献高亮" : "总结"}失败`, message,
+        hint: paused ? "可从历史任务继续；已完成分段会自动复用。" : "任务已停止。解决问题后可重新点击按钮重试。" });
+      if (!paused) { try { Zotero.logError(error); } catch (_) {} }
+    } finally {
+      this.finishTask(id);
+    }
+  },
+
   getBatchQueue() {
     try {
       const queue = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.batchQueue", true) || "{}");
@@ -419,9 +604,9 @@ var ZoteroMinerUAI = {
   getSelectedItemIDs() { return ZoteroAdapter.getSelectedItems().map(item => item.id); },
   async runBatch(ids, type, config, prompt, onEvent, shouldStop, options = {}) {
     const id = options.id || `batch-${Date.now()}`;
-    const signal = this.beginTask(id);
+    const signal = options.signal || this.beginTask(id);
     try { return await SIBatch.run(this, ids, type, config, prompt, onEvent, shouldStop, { signal }); }
-    finally { this.finishTask(id); }
+    finally { if (!options.signal) this.finishTask(id); }
   },
 
   renderMarkdown(container, markdown) { MarkdownRenderer.render(container, markdown); },
@@ -486,6 +671,7 @@ var ZoteroMinerUAI = {
     if (!info?.attachmentItem) throw new Error("所选文献没有可读取的 PDF 附件。");
     const targetItem = info.parentItem || item;
     const title = targetItem.getField?.("title") || info.fileName;
+    onProgress(`正在处理 PDF：${info.fileName || info.attachmentItem.attachmentFilename || info.attachmentItem.id}`);
     const extractionStarted = Date.now();
     const extracted = await SummaryTextCache.get(info, config, async () => {
       onProgress("正在读取 PDF 正文…");
@@ -509,12 +695,17 @@ var ZoteroMinerUAI = {
     onProgress(`正文准备完成（${(extractionMs/1000).toFixed(1)} 秒${extracted.cached ? '，复用缓存' : ''}）；${extracted.text.length.toLocaleString()} 字符${chunks > 1 ? `，需先分析 ${chunks} 段再整合` : ''}。正在等待模型生成…`);
     const modelStarted = Date.now();
     let incomplete = false, checkpointKey = null;
-    const result = await LLMClient.analyzePaper(extracted.text, promptType, config, (_delta, full) => {
-      onProgress(`AI 正在生成总结（已生成 ${full.length} 字符）…`);
-    }, prompt, onProgress, () => { incomplete = true; }, {
-      ...options, resumeKey: `summary:${info.attachmentItem.libraryID}:${info.attachmentItem.key || info.attachmentItem.id}:${promptType}`,
-      onCheckpoint: state => { checkpointKey = state.cacheKey; options.onCheckpoint?.(state); }
-    });
+    const progress = this.createUIUpdater(message => { if (!options.signal?.aborted) onProgress(message); });
+    let result;
+    try {
+      result = await LLMClient.analyzePaper(extracted.text, promptType, config, (_delta, full) => {
+        progress.push(`AI 正在生成总结（已生成 ${full.length} 字符）…`);
+      }, prompt, message => { progress.flush(); onProgress(message); }, () => { incomplete = true; }, {
+        ...options, resumeKey: `summary:${info.attachmentItem.libraryID}:${info.attachmentItem.key || info.attachmentItem.id}:${promptType}`,
+        onCheckpoint: state => { checkpointKey = state.cacheKey; options.onCheckpoint?.(state); }
+      });
+      progress.flush();
+    } finally { progress.cancel(); }
     this.checkTaskSignal(options.signal);
     const timings = { extractionMs, modelMs: Date.now() - modelStarted, cached: extracted.cached, chunks };
     return { markdown: result, title, targetItem, promptType, timings, incomplete, checkpointKey };
@@ -523,32 +714,38 @@ var ZoteroMinerUAI = {
   /**
    * 处理动作 1：仅使用 MinerU 提取并保存 Markdown 笔记
    */
-  async handleExtractMarkdown(selectedItem = null) {
-    const notifier = ZoteroAdapter.createProgressNotifier("MinerU 高精文档提取");
+  async handleExtractMarkdown(selectedItem = null, options = {}) {
+    const id = options.id || `extract-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const signal = options.signal || this.beginTask(id);
+    let notifier;
+    const report = message => { this.checkTaskSignal(signal); notifier?.update(message); options.onProgress?.(message); };
     try {
+      this.checkTaskSignal(signal);
+      notifier = ZoteroAdapter.createProgressNotifier("MinerU 高精文档提取");
       const item = selectedItem || ZoteroAdapter.getSelectedItem();
       if (!item) {
         throw new Error("请先在文献列表中选中需要解析的文献条目或 PDF 附件。");
       }
 
-      notifier.update("正在定位目标文献 PDF 文件...");
+      report("正在定位目标文献 PDF 文件...");
       const pdfInfo = await ZoteroAdapter.getPdfAttachment(item);
       if (!pdfInfo || !pdfInfo.filePath) {
         throw new Error("选中的条目没有找到关联的 PDF 附件，请确保已下载文献全文。");
       }
 
-      notifier.update(`正在读取本地文件: ${pdfInfo.fileName}`);
+      report(`正在读取本地文件: ${pdfInfo.fileName}`);
       const fileBuffer = await ZoteroAdapter.readFileBinary(pdfInfo.filePath);
+      this.checkTaskSignal(signal);
 
-      const config = this.getConfig();
+      const config = options.config || this.getConfig();
       const parseResult = await MinerUClient.parsePdf(
         pdfInfo.fileName,
         fileBuffer,
-        { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel },
-        (statusMsg) => notifier.update(statusMsg)
+        { mode: config.mineruMode, token: config.mineruToken, model: config.mineruModel, signal },
+        report
       );
 
-      notifier.update("解析成功，正在沉淀为 Zotero 笔记...");
+      report("解析成功，正在沉淀为 Zotero 笔记...");
       const targetItem = pdfInfo.parentItem || item;
 
       if (config.autoGenerateNote) {
@@ -560,14 +757,20 @@ var ZoteroMinerUAI = {
       }
 
       if (config.autoTag) {
+        this.checkTaskSignal(signal);
         await ZoteroAdapter.addTagsToItem(targetItem, ["#MinerU-Extracted"]);
       }
 
-      notifier.done("MinerU 文档提取已成功生成笔记！");
+      const message = config.autoGenerateNote ? "MinerU 文档提取已成功生成笔记！" : "MinerU 文档提取完成（自动生成笔记已关闭）。";
+      notifier.done(message);
+      return { ok: true, message };
     } catch (err) {
-      Zotero.logError(err);
-      notifier.fail(`提取失败: ${err.message}`);
-    }
+      const cancelled = this.isTaskCancelled(err, signal);
+      const message = cancelled ? "提取已取消；再次提取会重新申请解析。" : `提取失败: ${this.describeError(err)}`;
+      if (!cancelled) Zotero.logError(err);
+      notifier?.fail(message);
+      return { ok: false, cancelled, message };
+    } finally { if (!options.signal) this.finishTask(id); }
   },
 
   /**
@@ -637,6 +840,8 @@ var ZoteroMinerUAI = {
    * 销毁生命周期
    */
   async destroy() {
+    this.shuttingDown = true;
+    this.dashboardSubscribers.clear();
     for (const controller of this.taskControllers.values()) controller.abort();
     this.taskControllers.clear();
     if (typeof SummaryTextCache !== "undefined") SummaryTextCache.clear();

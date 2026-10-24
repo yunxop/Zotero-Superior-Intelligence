@@ -139,6 +139,7 @@ async function main() {
   elements.get("llmSlot").fire("change");
   const sse = [
     'data: {"choices":[{"delta":{"content":"你好"}}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
     'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}',
     "data: [DONE]", ""
   ].join("\n\n");

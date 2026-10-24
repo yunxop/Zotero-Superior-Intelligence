@@ -48,5 +48,45 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), vm = requ
  state.noteID=old.id;attachment.libraryID=2;
  const crossLibrary=await ctx.ZoteroAdapter.saveConversationNote(attachment,[{role:'user',content:'q'},{role:'assistant',content:'a'}],old.id);
  assert.notEqual(crossLibrary.id,old.id,'a note from another library must not be overwritten');assert.equal(old.html,oldHTML);
+ // Use the real shared updater with a deterministic clock to count expensive
+ // Markdown renders and catch trailing writes after completion/cancellation.
+ let now=1000,nextTimer=1;const timers=new Map(),painted=[];
+ ctx.Date=class extends Date{static now(){return now;}};
+ ctx.setTimeout=(fn,ms)=>{const id=nextTimer++;timers.set(id,{fn,at:now+ms});return id;};
+ ctx.clearTimeout=id=>timers.delete(id);
+ const tick=ms=>{now+=ms;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}};
+ const realRender=ctx.MarkdownRenderer.render.bind(ctx.MarkdownRenderer);
+ ctx.MarkdownRenderer.render=(node,text)=>{painted.push(text);realRender(node,text);};
+ let stream,resolveAnswer,rejectAnswer;
+ ctx.LLMClient.chatWithPdf=async(_text,_history,_config,onStream,{signal})=>new Promise((resolve,reject)=>{
+  stream=onStream;resolveAnswer=resolve;rejectAnswer=reject;
+  signal.addEventListener('abort',()=>{const e=Error('paused');e.name='AbortError';reject(e);},{once:true});
+ });
+ state.history=[];state.noteID=null;attachment.libraryID=1;
+ chat.render(doc,body);
+ const start=async()=>{
+  stream=null;input().value='performance question';const pending=button('发送问题').listeners.click();
+  for(let i=0;!stream&&i<20;i++)await Promise.resolve();assert.ok(stream);return {pending};
+ };
+ let run=await start();
+ const log=all(body).find(n=>n.className==='mineru-chat-log');
+ log.scrollHeight=2000;log.clientHeight=400;log.scrollTop=120;
+ let count=painted.length;
+ for(let i=1;i<=1000;i++)stream('x','x'.repeat(i));
+ assert.equal(painted.length-count,1);tick(200);assert.equal(painted.length-count,2);
+ assert.equal(painted.at(-1).length,1000);assert.equal(log.scrollTop,120,'reading earlier text must not jump to bottom');
+ log.scrollTop=1580;stream('x','near-bottom');tick(200);assert.equal(log.scrollTop,2000,'near-bottom view follows new text');
+ stream('x','queued stale fragment');resolveAnswer('FINAL complete answer');await run.pending;tick(300);
+ assert.equal(painted.at(-1),'FINAL complete answer');assert.equal(state.history.at(-1).content,'FINAL complete answer');assert.equal(timers.size,0);
+ run=await start();stream('x','visible partial');stream('x','must not paint after pause');count=painted.length;
+ button('暂停回答').listeners.click();await run.pending;tick(300);assert.equal(painted.length,count);assert.equal(timers.size,0);
+ run=await start();stream('x','before error');stream('x','stale after error');rejectAnswer(Error('network failed'));await run.pending;tick(300);
+ assert.match(painted.at(-1),/network failed/);assert.equal(timers.size,0);
+ run=await start();stream('x','before clear');stream('x','stale after clear');count=painted.length;
+ button('清空对话').listeners.click();await run.pending;tick(300);assert.equal(painted.length,count);assert.equal(state.history.length,0);assert.equal(timers.size,0);
+ run=await start();stream('x','before close');stream('x','stale after close');count=painted.length;
+ body.isConnected=false;chat.releaseView(body);await run.pending;tick(300);
+ assert.equal(painted.length,count);assert.equal(timers.size,0);assert.equal(chat.viewUpdates.size,0);
+ console.log('reader performance passed: 1,000 fragments -> 2 Markdown renders, final answer intact, manual scroll preserved, cancellation/error/clear/destroy cleanup');
  console.log('reader protection passed: clear/new note, update same conversation, double save, late answer, settings reopen and wrong-library protection');
 })().catch(e=>{console.error(e);process.exitCode=1;});

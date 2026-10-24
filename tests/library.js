@@ -97,9 +97,30 @@ async function main() {
   assert.equal(llmCalls,requestsBeforeInvalid);
   const prior={itemID:1,title:'Carbon mechanisms',text:'Temperature drives release.'};
   const unrelated={itemID:6,title:'Other field',text:'An unrelated limitation.'};
-  assert.equal(chat.select([unrelated,prior],'limitation',14000,[prior])[0].itemID,1,'follow-up evidence takes priority over unrelated keyword hits');
+  const followupMatches=chat.select([unrelated,prior],'limitation',14000,[prior]);
+  assert.equal(followupMatches[0].itemID,6,'this question\'s matches precede unmatched prior evidence');
+  assert.ok(followupMatches.includes(prior),'follow-ups retain prior evidence when budget allows');
   const samePaperNew={itemID:1,title:'Carbon mechanisms',text:'Important limitation from the same study.'};
-  assert.equal(chat.select([unrelated,prior,samePaperNew],'limitation',14000,[prior])[0].text,samePaperNew.text,'new matching evidence in prior papers is preferred');
+  assert.equal(chat.select([unrelated,prior,samePaperNew],'limitation',14000,[prior])[0].text,samePaperNew.text,'equally relevant new evidence in prior papers is preferred');
+  const oldTopic=Array.from({length:8},(_,i)=>({itemID:100+i,title:'Carbon '+i,kind:'abstract',text:'Old evidence '+i+' '+ 'c'.repeat(1500)}));
+  const zinc={itemID:200,title:'Zinc effects',kind:'abstract',text:'zinc '+ 'z'.repeat(1500)};
+  const switched=chat.select([...oldTopic,zinc],'zinc',14000,oldTopic);
+  const cost=source=>source.text.length+source.title.length+180;
+  assert.equal(switched[0],zinc,'a topic switch must include its current hit before prior snippets fill the budget');
+  assert.ok(switched.filter(s=>s!==zinc).reduce((n,s)=>n+cost(s),0)<=4000,'unmatched history has a separate bounded budget');
+  assert.ok(switched.reduce((n,s)=>n+cost(s),0)<=14000);
+  const tightBudget=cost(zinc)+10;
+  assert.deepEqual(Array.from(chat.select([...oldTopic,zinc],'zinc',tightBudget,oldTopic)),[zinc],'current evidence gets scarce context budget');
+  assert.ok(chat.select(oldTopic,'zzfollowuponly',14000,oldTopic).length>0,'no-hit follow-ups can still resolve earlier evidence');
+  const weakPrior={itemID:1,title:'Carbon mechanisms',text:'zinc is mentioned briefly.'};
+  assert.equal(chat.select([weakPrior,zinc],'zinc',14000,[weakPrior])[0],zinc,'prior-paper preference cannot override a stronger current match');
+  const duplicate={...zinc,itemID:201};
+  assert.equal(chat.select([zinc,duplicate],'zinc',14000,[zinc]).length,1,'source text is deduplicated across current hits and history');
+  assert.deepEqual(Array.from(chat.terms('锌 铜 和 x a')),['锌','铜'],'single-character Chinese subjects survive without single English letters or stop words');
+  const chineseSources=[{itemID:300,title:'锌的作用',text:'锌参与该过程。'},{itemID:301,title:'铜的作用',text:'铜参与另一过程。'}];
+  assert.deepEqual(Array.from(chat.rank(chineseSources,'锌'),r=>r.source.itemID),[300]);
+  const unsegmented=vm.createContext({Intl:{}});load(unsegmented,'library_chat.js');
+  assert.deepEqual(Array.from(unsegmented.SILibraryChat.terms('锌 铜 和 x a')),['锌','铜'],'fallback tokenization also preserves single Han subjects');
   const before=llmCalls;
   const stats=await invoke('stats');assert.equal(stats.ok,true);assert.equal(llmCalls,before);assert.match(stats.result.markdown,/1 个条目/);
   const empty=await invoke('ask',{question:'xxxxnosuchterm'});assert.equal(llmCalls,before);assert.match(empty.result.markdown,/没有检索到/);
@@ -202,6 +223,15 @@ async function persistentOverview() {
   const reused=await invoke(ctx,'persistent-repeated');
   assert.equal(reused.ok,true,reused.error);assert.equal(reused.result.cachedBatches,batchCount);assert.equal(count(),1);
   assert.equal(JSON.parse([...disk.values()][0]).entries.length,1);
+  ctx=create();count=install(ctx);
+  const keyFor=ctx.TaskCheckpointCache.keyFor.bind(ctx.TaskCheckpointCache);
+  ctx.TaskCheckpointCache.keyFor=(resumeKey,identity)=>keyFor(resumeKey,{...identity,version:1});
+  const legacy=await invoke(ctx,'legacy-checkpoint',{question:'legacy goal'});
+  assert.equal(legacy.ok,true,legacy.error);
+  ctx=create();count=install(ctx);
+  const afterLegacy=await invoke(ctx,'after-legacy-checkpoint',{question:'legacy goal'});
+  assert.equal(afterLegacy.ok,true,afterLegacy.error);assert.equal(afterLegacy.result.cachedBatches,0);
+  assert.equal(count(),batchCount+1,'checkpoints written before strict completion validation must not be reused');
   for(const [factory,payload,changePrompt] of [
     [{sources:sources.map((s,i)=>i ? s : {...s,text:s.text+' changed'})},{},false],
     [{},{question:'different goal'},false],

@@ -164,7 +164,7 @@ const watchdog = setTimeout(() => { console.error('task resume tests did not fin
     ctx=context(); calls=0;
     const mineruController=new AbortController();
     ctx.fetch=async (_url,options)=>{
-      calls++; assert.equal(options.signal,mineruController.signal);
+      calls++; assert(options.signal); assert.equal(options.signal.aborted,false);
       return {ok:true,json:async()=>({code:0,data:mode==='agent'?{task_id:'task',file_url:'https://upload.test'}:{batch_id:'batch',file_urls:['https://upload.test']}})};
     };
     await assert.rejects(() => ctx.MinerUClient.parsePdf('paper.pdf',new Uint8Array([1]),{mode,token:'test-token',signal:mineruController.signal},message=>{
@@ -175,7 +175,7 @@ const watchdog = setTimeout(() => { console.error('task resume tests did not fin
 
   ctx=context();
   const zipController=new AbortController(); let removed=0,opened=0;
-  ctx.fetch=async (_url,options)=>{assert.equal(options.signal,zipController.signal);return {ok:true,arrayBuffer:async()=>new Uint8Array([1]).buffer};};
+  ctx.fetch=async (_url,options)=>{assert(options.signal);assert.equal(options.signal.aborted,false);return {ok:true,arrayBuffer:async()=>new Uint8Array([1]).buffer};};
   ctx.Zotero.getTempDirectory=()=>({clone:()=>({path:'/tmp/test.zip',append(){}})});
   ctx.Components={classes:{'@mozilla.org/libjar/zip-reader;1':{createInstance:()=>({open(){opened++;},close(){}})}},interfaces:{nsIZipReader:{}}};
   ctx.IOUtils.write=async()=>{zipController.abort();}; ctx.IOUtils.remove=async()=>{removed++;};

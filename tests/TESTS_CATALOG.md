@@ -31,6 +31,12 @@
 - `task_settings.js`：全局思考、各任务 Token 上限及工作台任务类型保存。
 - `task_resume.js`：跨运行时检查点恢复、参数变化失效和 LLM/MinerU 取消。
 - `task_integration.js`：总结笔记去重、批处理重启恢复和高亮取消回滚。
+- `attachment_selection.js`：指定附件、同父多 PDF、父子重叠选择及笔记归属。
+- `network_resilience.js`：流式结束状态、错误帧、UTF-8 拆分、损坏响应禁止缓存，MinerU 请求/正文/总流程超时及取消清理。
+- `background_tasks.js`：关闭窗口后保存、任务重连与暂停、批处理继续、高亮及提取、界面解绑、后台异常和插件退出取消。
+- `ui_performance.js`：千次流式片段合并、任务历史节点复用、完成刷新、附件续跑以及直接提取暂停与关闭后保存。
+
+阅读器与文献库 UI 回归同时检查流式合并、取消后的迟到更新，以及最终回答与引文按钮完整性。
 
 浏览器测试使用 Playwright；安装依赖后运行 `npx playwright install chromium`，也可设置 `CHROME_PATH` 使用系统 Chrome。
 

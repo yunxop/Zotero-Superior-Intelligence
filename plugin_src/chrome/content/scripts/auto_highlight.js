@@ -217,6 +217,7 @@ var AutoHighlight = {
     const info = await ZoteroAdapter.getPdfAttachment(item);
     const attachment = info?.attachmentItem;
     if (!attachment || !info.filePath) throw new Error("请选择具有本地 PDF 附件的文献。");
+    report(`正在处理 PDF：${info.fileName || attachment.attachmentFilename || attachment.id}`);
     if (!Zotero.Libraries.get(attachment.libraryID)?.editable) throw new Error("此文献库只读，无法添加高亮。");
     if (this.running.has(attachment.id)) throw new Error("此 PDF 的高亮任务正在运行，请勿重复提交。");
     this.running.add(attachment.id);

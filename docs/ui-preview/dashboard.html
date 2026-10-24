@@ -69,7 +69,7 @@
     .si-selection-row small { color:#627086; flex-shrink:0; }
     .si-selection-row[data-status="failed"] small { color:#ad413c; }
     .si-selection-row[data-status="completed"] small { color:#247563; }
-    #si-batch-stop[hidden] { display:none; }
+    :is(#si-batch-stop, #si-batch-resume)[hidden] { display:none; }
     .si-batch-result { margin:12px 0; border:1px solid #e4eaf1; border-radius:8px; padding:12px; }
     .si-batch-result summary { cursor:pointer; font-weight:600; overflow-wrap:anywhere; }
   </style>
@@ -104,7 +104,8 @@
       </div>
       <div class="mineru-actions">
         <button id="si-summary" type="button">生成并保存到文献笔记</button>
-        <button id="si-batch-stop" type="button" hidden="hidden">完成当前文献后停止</button>
+        <button id="si-batch-stop" type="button" hidden="hidden">暂停任务</button>
+        <button id="si-batch-resume" type="button" hidden="hidden">继续批处理</button>
       </div>
       <div id="mineru-dashboard-result" aria-live="polite"></div>
     </section>
@@ -128,7 +129,7 @@
       <strong>连接配置</strong>
       <p id="mineru-current-config"></p>
       <div class="mineru-actions"><button id="si-thinking" type="button" aria-pressed="false">思考：关闭</button><label for="si-output-limit">本类任务输出上限</label><select id="si-output-limit"><option value="4096">4,096 Token</option><option value="8192" selected="selected">8,192 Token</option><option value="16384">16,384 Token</option><option value="32768">32,768 Token</option></select></div>
-      <p class="mineru-help">思考开关适用于官方 DeepSeek 混合模型；其他模型遵循服务端设置。开启思考可能增加时间与用量。上限受模型支持范围约束；普通总结触及上限将保存“未完成”笔记，高亮 JSON 不完整时不写入。</p>
+      <p class="mineru-help">思考开关和各类任务输出上限自动保存，关闭界面后仍保留。思考开关适用于官方 DeepSeek 混合模型；其他模型遵循服务端设置。开启思考可能增加时间与用量。上限受模型支持范围约束；普通总结触及上限将保存“未完成”笔记，高亮 JSON 不完整时不写入。</p>
       <label for="si-dashboard-profile">本次使用的模型配置</label>
       <select id="si-dashboard-profile" style="display:block; width:100%; box-sizing:border-box; margin:8px 0; padding:7px;"></select>
       <button id="mineru-dashboard-preferences" type="button">打开 SI 设置</button>
@@ -141,7 +142,8 @@
     <dialog id="si-summary-dialog" aria-labelledby="si-summary-dialog-title">
       <h2 id="si-summary-dialog-title">正在生成总结</h2>
       <p id="si-summary-progress" role="status" aria-live="polite"></p>
-      <p id="si-summary-dialog-hint">关闭提示后任务会继续运行，可在“文献任务”中查看进度。</p>
+      <p id="si-summary-dialog-hint">关闭 SI 窗口后任务会继续运行；重新打开可查看进度或暂停。</p>
+      <button type="button" id="si-dialog-pause">暂停任务</button>
       <button type="button" id="si-summary-dialog-close">关闭提示</button>
     </dialog>
   </main>

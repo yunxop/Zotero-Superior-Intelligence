@@ -2,12 +2,12 @@
 
 <div align="center">
 
-[![Zotero 10 Ready](https://img.shields.io/badge/Zotero-10.0%20%7C%207.0-blue.svg)](https://www.zotero.org/)
+[![Zotero 10 Ready](https://img.shields.io/badge/Zotero-10.0.x-blue.svg)](https://www.zotero.org/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](LICENSE)
 [![100% Free & Open Source](https://img.shields.io/badge/100%25-Free%20%26%20Open%20Source-brightgreen.svg)](#-纯粹开源零门槛人人用得起)
 [![Zero Paywall](https://img.shields.io/badge/Zero-Paywall-blue.svg)](#-纯粹开源零门槛人人用得起)
-[![Release](https://img.shields.io/badge/Release-v1.1.0-brightgreen.svg)](https://github.com/yunz1110/Zotero-Superior-Intelligence/releases)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yunz1110/Zotero-Superior-Intelligence/pulls)
+[![Release](https://img.shields.io/badge/Source-v1.1.2-brightgreen.svg)](https://github.com/yunxop/Zotero-Superior-Intelligence/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yunxop/Zotero-Superior-Intelligence/pulls)
 
 **专为下一代 Zotero 10 深度定制 · 100% 永久免费开源 · 让每个人都用得起的顶配 AI 学术伴侣**  
 零付费门槛 · 无强制订阅 · 极速解析 · 秒级文献总结 · 原文沉浸对话 · 智能重点高亮 · 全库交叉知识库
@@ -67,6 +67,7 @@
 ### 7. 🔄 批量队列调度与中断保护 (Batch Processing)
 - **串行异步队列**：支持多选数十篇文献一键批量解析与总结。
 - **失败隔离机制**：单篇文献因网络超时或异常不会阻断后续任务，支持中途安全暂停与断点续提。
+- **关闭窗口继续运行**：总结、表格总结、高亮、批处理和正文提取由插件后台执行；关闭 SI 工作台后继续处理，重开可查看进度或主动暂停。退出 Zotero 或停用插件仍会中断任务。
 
 ---
 
@@ -82,11 +83,11 @@
 
 ## 🚀 快速安装指南
 
-### 方式一：直接安装官方预编译包（推荐）
+### 方式一：安装预编译包（推荐）
 
-1. 前往本仓库 [Releases](https://github.com/yunz1110/Zotero-Superior-Intelligence/releases) 页面，或在 `dist/` 目录中下载最新版安装包：
-   - 📥 **`zotero-superior-intelligence-1.1.0.xpi`**
-2. 启动 **Zotero**（专为 Zotero 10 深度优化，亦向下兼容 Zotero 7.0 及以上版本）。
+1. 当前源码与构建目标版本为 **1.1.2**，安装包位于 `dist/`。已发布版本可在 [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 下载；自动更新清单仅在对应 Release 附件可下载后更新：
+   - 📥 **`zotero-superior-intelligence-1.1.2.xpi`**
+2. 启动 **Zotero**（支持 Zotero 10.0.x；当前安装包不支持 Zotero 7/8/9）。
 3. 点击顶部菜单栏：**工具 (Tools)** -> **插件 (Add-ons / Plugins)**。
 4. 将下载的 `.xpi` 文件直接**拖入插件窗口**（或点击右上角齿轮图标选择 `Install Add-on From File...`）。
 5. 提示安装成功后，重启 Zotero 即可开启全新体验。
@@ -95,7 +96,7 @@
 
 ```bash
 # 1. 克隆代码仓库
-git clone https://github.com/yunz1110/Zotero-Superior-Intelligence.git
+git clone https://github.com/yunxop/Zotero-Superior-Intelligence.git
 cd Zotero-Superior-Intelligence
 
 # 2. 执行打包脚本
@@ -104,14 +105,16 @@ python build_xpi.py
 npm run build
 
 # 3. 生成的安装包位于 dist/ 目录：
-# dist/zotero-superior-intelligence-1.1.0.xpi
+# dist/zotero-superior-intelligence-1.1.2.xpi
 ```
 
 ---
 
 ## ⚙️ 配置与使用指南
 
-思考模式和各任务的 Token 上限会自动保存；工作台支持暂停任务及复用已完成分段续跑。PDF 对话清空后另建笔记，公式可在界面和 Zotero 笔记中显示、编辑。详见 [设置保存与任务续跑](docs/TASK_CONTROLS.md)。
+1.1.2 将工作台任务移至插件后台，并汇总本地 1.1.1 修订中的响应完整性、指定 PDF 选择、中文单字检索、追问证据优先级、MinerU 超时与界面性能修复。详见 [1.1.2 更新说明](docs/RELEASE_1.1.2.md)。
+
+思考模式和各任务的 Token 上限会自动保存；工作台关闭后任务仍在后台执行并保存结果，重新打开可查看进度或暂停，并支持复用已完成分段续跑。PDF 对话清空后另建笔记，公式可在界面和 Zotero 笔记中显示、编辑。详见 [设置保存与任务续跑](docs/TASK_CONTROLS.md)。
 
 ### 1. 打开插件首选项
 在 Zotero 主界面点击：**编辑 (Edit)** -> **首选项 (Preferences)** -> 选择 **Superior Intelligence (SI)** 标签页。
@@ -170,7 +173,9 @@ zotero-superior-intelligence/
 │   └── ui-preview/            # 离线预览与截图资产
 └── dist/                      # 分发产物目录
     ├── DIST_CATALOG.md        # 分发目录规范说明
-    ├── zotero-superior-intelligence-1.1.0.xpi  # 当前版本安装包
+    ├── zotero-superior-intelligence-1.1.2.xpi  # 当前构建目标安装包
+    ├── zotero-superior-intelligence-1.1.1.xpi  # 本地修订回退包
+    ├── zotero-superior-intelligence-1.1.0.xpi  # 上一发布版本回退包
     ├── zotero-superior-intelligence-1.0.0.xpi  # 原始旧版安装包
     └── archive/               # 历史安装包归档子目录
 ```
@@ -179,7 +184,7 @@ zotero-superior-intelligence/
 
 ## 🧪 测试套件运行
 
-本项目内置完整的无头测试套件，在离线 Mock 环境下校验全部业务逻辑与安全脱敏机制：
+`npm run test:all` 包含 19 个测试脚本，覆盖模拟 Zotero 环境下的任务、恢复、网络与保存逻辑，以及真实无头浏览器中的文献库界面。首次运行先执行 `npm install` 和 `npx playwright install chromium`；也可通过 `CHROME_PATH` 指定系统 Chrome。这些测试不替代真实 Zotero 和真实 API 联调。
 
 ```bash
 # 执行核心冒烟测试
@@ -193,7 +198,7 @@ npm run test:all
 
 ## <a id="english-summary"></a>🌐 English Summary
 
-**Zotero Superior Intelligence (SI)** is a 100% free and open-source AI literature copilot tailored for **Zotero 10** (and compatible with Zotero 7). Built with **zero paywalls and no subscriptions**, it is designed to be affordable and accessible to every student and researcher worldwide.
+**Zotero Superior Intelligence (SI)** is a 100% free and open-source AI literature copilot tailored for **Zotero 10.0.x**. Built with **zero paywalls and no subscriptions**, it is designed to be affordable and accessible to every student and researcher worldwide.
 
 ### Key Highlights:
 - 💚 **100% Free & Open-Source**: Zero paywalls, no mandatory subscriptions. Works seamlessly with ultra-cheap DeepSeek tokens or completely free local Ollama models.

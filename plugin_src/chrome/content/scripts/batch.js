@@ -32,7 +32,7 @@ var SIBatch = {
         try {
           const item = Zotero.Items.get(itemID);
           if (!item || item.deleted) throw new Error("文献不存在或已删除。");
-          title = item.getField?.("title") || item.attachmentFilename || title;
+          title = (item.isAttachment?.() ? item.attachmentFilename : "") || item.getField?.("title") || title;
           emit({ kind: "progress", itemID, index: i + 1, total: queue.length, title, message: stage });
           const info = await ZoteroAdapter.getPdfAttachment(item);
           if (!info?.attachmentItem || !info.filePath) throw new Error("没有可读取的本地 PDF 附件。");
@@ -42,7 +42,7 @@ var SIBatch = {
             continue;
           }
           seenPDFs.add(info.attachmentItem.id);
-          taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID: item.parentID || item.id, settings: savedQueue.settings, prompt });
+          taskID = app.startSummaryTask({ title, promptType: type, profileSlot: snapshot.llmSlot, itemID: info.attachmentItem.id, settings: savedQueue.settings, prompt });
           const report = message => {
             stage = message;
             app.updateSummaryTask(taskID, { stage: message });

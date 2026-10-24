@@ -79,7 +79,7 @@
    <section class="card">
     <div class="row"><label for="library-profile">模型</label><select id="library-profile" style="width:auto;max-width:75%"></select></div>
     <div class="row"><button id="library-thinking" type="button" aria-pressed="false">思考：关闭</button><label for="library-limit">本次输出上限</label><select id="library-limit" style="width:auto"><option value="4096">4,096 Token</option><option value="8192" selected="selected">8,192 Token</option><option value="16384">16,384 Token</option><option value="32768">32,768 Token</option></select></div>
-    <p class="muted">思考开关仅适用于官方 DeepSeek 混合模型；其他模型使用服务端策略。开启思考可能增加时间与用量。触及输出上限时保留部分结果，可保存为“未完成”笔记。</p>
+    <p class="muted">思考开关和输出上限自动保存，关闭界面后仍保留。思考开关仅适用于官方 DeepSeek 混合模型；其他模型使用服务端策略。开启思考可能增加时间与用量。触及输出上限时保留部分结果，可保存为“未完成”笔记。</p>
     <p class="muted">本地索引不消耗 Token。问答只发送检索片段；范围综述会分批发送全部所选资料。</p>
     <div class="divider"></div>
     <div id="library-conversation" class="conversation"><div class="empty" id="library-empty">让零散的阅读，形成清晰的研究线索。<p class="muted">例如：这些文献对碳循环机制有哪些不同解释？</p></div></div>

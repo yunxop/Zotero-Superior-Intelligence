@@ -10,17 +10,17 @@ var ZoteroAdapter = {
     const pane = Zotero.getActiveZoteroPane();
     const raw = Array.from(pane?.getSelectedItems?.() || []).filter(item => !item.deleted &&
       (item.isRegularItem?.() || (item.isAttachment?.() && item.attachmentContentType === "application/pdf")));
+    // Explicit PDF selections take precedence over their selected parent. Keeping
+    // attachment IDs also preserves multiple selected PDFs belonging to one paper.
+    const explicitParents = new Set(raw.filter(item => item.isAttachment?.() && item.parentItemID)
+      .map(item => item.parentItemID));
     const normalized = [];
     const seenIDs = new Set();
     for (const item of raw) {
-      let target = item;
-      if (item.isAttachment?.() && item.parentItemID) {
-        const parent = Zotero.Items.get(item.parentItemID);
-        if (parent && !parent.deleted) target = parent;
-      }
-      if (!seenIDs.has(target.id)) {
-        seenIDs.add(target.id);
-        normalized.push(target);
+      if (item.isRegularItem?.() && explicitParents.has(item.id)) continue;
+      if (!seenIDs.has(item.id)) {
+        seenIDs.add(item.id);
+        normalized.push(item);
       }
     }
     return normalized;
@@ -29,11 +29,7 @@ var ZoteroAdapter = {
    * 获取当前选中的常规文献条目或 PDF 附件
    */
   getSelectedItem() {
-    const pane = Zotero.getActiveZoteroPane();
-    if (!pane) return null;
-    const items = pane.getSelectedItems();
-    if (!items || items.length === 0) return null;
-    return items[0];
+    return this.getSelectedItems()[0] || null;
   },
 
   /**

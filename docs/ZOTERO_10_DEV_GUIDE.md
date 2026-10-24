@@ -18,8 +18,8 @@ Zotero 10 彻底移除了 Firefox 早期的传统遗留组件（如 `install.rdf
 ```json
 {
   "manifest_version": 2,
-  "name": "Zotero AI & MinerU Assistant",
-  "version": "1.0.0",
+  "name": "Zotero Superior Intelligence",
+  "version": "1.1.2",
   "description": "Zotero 10 深度集成 AI 助手与 MinerU 高精度文献结构化解析插件",
   "icons": {
     "48": "chrome/content/icons/favicon.png",
@@ -28,15 +28,15 @@ Zotero 10 彻底移除了 Firefox 早期的传统遗留组件（如 `install.rdf
   "applications": {
     "zotero": {
       "id": "zotero-mineru-ai@custom.org",
-      "update_url": "https://raw.githubusercontent.com/opendatalab/MinerU/master/update.json",
-      "strict_min_version": "6.999",
-      "strict_max_version": "10.*"
+      "update_url": "https://raw.githubusercontent.com/yunxop/Zotero-Superior-Intelligence/main/update.json",
+      "strict_min_version": "10.0",
+      "strict_max_version": "10.0.*"
     }
   }
 }
 ```
 > [!TIP]
-> 将 `strict_min_version` 设为 `"6.999"` 能够让插件同时无缝兼容 Zotero 7、8、9 及最新的 Zotero 10 各种小版本（如 10.0.3）。
+> 当前安装包声明支持 Zotero 10.0.x。修改版本限制仅影响安装检查，不能证明旧版本 API 兼容；未经过真机验证前，不应降低最低版本或宣称兼容 Zotero 7/8/9。
 
 
 ---

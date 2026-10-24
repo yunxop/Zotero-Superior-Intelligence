@@ -28,10 +28,11 @@ try {
   await page.setContent(fs.readFileSync('docs/ui-preview/library.html','utf8'));
   await page.addScriptTag({content:fs.readFileSync('plugin_src/chrome/content/scripts/markdown_renderer.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('plugin_src/chrome/content/scripts/library_index.js','utf8')});
+  await page.addScriptTag({content:fs.readFileSync('plugin_src/chrome/content/scripts/main.js','utf8')});
   const setupMock=()=>{
    window.calls=[];window.stops=[];
    window.savedTaskSettings ||= {thinking:false,maxTokens:8192};
-   window.Zotero={getMainWindow:()=>window,MinerUAI:{getTaskSettings:()=>({...window.savedTaskSettings}),saveTaskSettings:(_type,value)=>{window.savedTaskSettings={...value};},describeError:e=>e.message,renderMarkdown:(node,text)=>MarkdownRenderer.render(node,text),openPreferences(){},stopLibraryTask(id){window.stops.push(id);window.release?.();},
+   window.Zotero={getMainWindow:()=>window,MinerUAI:{createUIUpdater:window.ZoteroMinerUAI.createUIUpdater,getTaskSettings:()=>({...window.savedTaskSettings}),saveTaskSettings:(_type,value)=>{window.savedTaskSettings={...value};},describeError:e=>e.message,renderMarkdown:(node,text)=>MarkdownRenderer.render(node,text),openPreferences(){},stopLibraryTask(id){window.stops.push(id);window.release?.();window.streamRelease?.();},
     async libraryCall(action,json,onEvent){
      const payload=JSON.parse(json);calls.push({action,payload});let result;
      if(action==='options')result={defaultLibrary:1,activeProfile:1,libraries:[{id:1,name:'我的图书馆',collections:[{id:10,name:'生态系统',parentID:null},{id:11,name:'碳循环',parentID:10}]}],profiles:[{slot:1,name:'科研助手',model:'test-model'}],selected:[{id:1,libraryID:1,title:'Carbon cycling and climate'}]};
@@ -42,6 +43,14 @@ try {
       onEvent(JSON.stringify({kind:'progress',text:'正在检索资料…'}));
       onEvent(JSON.stringify({kind:'scope',stats:{items:128,papers:128,abstracts:112,annotated:46,evidenceItems:115,sources:530}}));
       if(payload.question==='停止测试') {await new Promise(resolve=>window.release=resolve);return JSON.stringify({ok:false,error:'任务已停止。'});}
+      if(payload.question.startsWith('流式')) {
+       window.streamEmit=onEvent;
+       await new Promise(resolve=>window.streamRelease=resolve);
+       if(payload.question==='流式取消测试') {
+        onEvent(JSON.stringify({kind:'answer',text:'late after stop'}));
+        return JSON.stringify({ok:false,error:'任务已停止。'});
+       }
+      }
       onEvent(JSON.stringify({kind:'answer',text:'正在生成科研回答'}));
       result={id:payload.id,action,question:payload.question,markdown:'## 主要发现\n温度变化可能影响碳释放。[S1]\n\n| 主题 | 证据 |\n| --- | --- |\n| 碳循环 | 高亮原文 [S1] |',sources:[{ref:'S1',kind:'annotation',sourceID:3,itemID:1,uid:'1/K1/K3/annotation/0',title:'Carbon cycling and climate',text:'Temperature increases carbon release.',page:'7',category:'结论'}],referencedItems:1,usage:{total:1500,unreported:0},durationMs:1200,cachedBatches:0};
      }
@@ -86,6 +95,7 @@ try {
   const reopened=await page.context().newPage();
   await reopened.setContent(fs.readFileSync('docs/ui-preview/library.html','utf8'));
   await reopened.evaluate(value=>{window.savedTaskSettings=value;},persisted);
+  await reopened.addScriptTag({content:fs.readFileSync('plugin_src/chrome/content/scripts/main.js','utf8')});
   await reopened.evaluate(setupMock);
   await reopened.addScriptTag({content:fs.readFileSync('plugin_src/chrome/content/scripts/library_ui.js','utf8')});
   await reopened.evaluate(()=>window.dispatchEvent(new Event('load')));
@@ -126,8 +136,40 @@ try {
   await page.locator('#library-ask').click();
   await page.waitForFunction(()=>document.querySelector('#library-status').textContent.includes('已完成'));
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.action==='ask').at(-1).payload.history.length),0,'clearing starts a new topic');
+  await page.locator('#library-question').fill('流式性能测试');
+  await page.locator('#library-ask').click();
+  await page.waitForFunction(()=>typeof window.streamEmit==='function');
+  const firstPaints=await page.evaluate(async()=>{
+   window.streamPaints=0;
+   const answer=document.querySelector('article:last-child .answer');
+   window.streamObserver=new MutationObserver(records=>{window.streamPaints+=records.length;});
+   window.streamObserver.observe(answer,{childList:true});
+   for(let i=1;i<=80;i++)window.streamEmit(JSON.stringify({kind:'answer',text:'piece-'+i}));
+   await Promise.resolve();return window.streamPaints;
+  });
+  assert.equal(firstPaints,1,'only the first fragment in a burst is rendered immediately');
+  await page.waitForFunction(()=>document.querySelector('article:last-child .answer').textContent==='piece-80');
+  assert.equal(await page.evaluate(()=>window.streamPaints),2,'the remaining 79 fragments share one paint');
+  await page.evaluate(()=>{window.streamEmit(JSON.stringify({kind:'answer',text:'pending before final'}));window.streamRelease();});
+  await page.waitForFunction(()=>document.querySelector('#library-status').textContent.includes('已完成'));
+  await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,250)));
+  assert.equal(await page.locator('article').last().locator('.citation').count(),2,'pending text cannot overwrite final citations');
+  assert.ok((await page.locator('article').last().textContent()).includes('温度变化'));
+  await page.evaluate(()=>{window.streamObserver.disconnect();window.streamEmit=null;});
+  await page.locator('#library-question').fill('流式取消测试');
+  await page.locator('#library-ask').click();
+  await page.waitForFunction(()=>typeof window.streamEmit==='function');
+  await page.evaluate(()=>{window.streamEmit(JSON.stringify({kind:'answer',text:'visible'}));window.streamEmit(JSON.stringify({kind:'answer',text:'pending after stop'}));});
+  await page.locator('#library-stop').click();
+  await page.waitForFunction(()=>document.querySelector('#library-status').textContent.includes('任务已停止'));
+  await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,250)));
+  assert.match(await page.locator('article').last().locator('.answer').textContent(),/本次任务未完成/);
+  assert.ok(!(await page.locator('article').last().textContent()).includes('late after stop'));
+  await page.locator('#library-clear').click();
+  await page.evaluate(()=>{window.streamEmit(JSON.stringify({kind:'answer',text:'late after clear'}));});
+  assert.equal(await page.locator('article').count(),0);
   assert.deepEqual(errors,[]);
-  console.log('library browser UI tests passed: follow-up history, persisted settings after reopen, scope reset, new topics, rendering, citations, save, extraction, responsive layout and stop');
+  console.log('library browser UI tests passed: follow-up history, settings, scope, citations, responsive layout; 80 stream fragments -> 2 paints, final citation preservation and stop/clear late-update protection');
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
 

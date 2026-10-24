@@ -14,6 +14,8 @@
     $('thinking').addEventListener('click', () => { thinking = !thinking; paintThinking(); saveSettings(); });
     $('limit').addEventListener('change', saveSettings);
     let busy = false, jobID = null, options = null, selected = [], history = [], contextKey = '';
+    let answerUpdater = null, stopRequested = false, disposed = false;
+    const cancelAnswerUpdates = () => { answerUpdater?.cancel(); answerUpdater = null; };
     const api = async (action, payload = {}, onEvent) => {
       const response = JSON.parse(await app.libraryCall(action, JSON.stringify(payload), onEvent));
       if (!response.ok) throw new Error(response.error); return response.result;
@@ -87,7 +89,8 @@
       if (opts.mode === 'selected' && !opts.itemIDs.length) { $('status').textContent = '请先在文献库选择条目，再重新读取选择。'; return; }
       if (opts.mode === 'collection' && !opts.collectionID) { $('status').textContent = '请先选择分类。'; return; }
       const nextKey = JSON.stringify(opts); if (nextKey !== contextKey) { history = []; contextKey = nextKey; }
-      jobID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      cancelAnswerUpdates(); stopRequested = false;
+      const id = jobID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setBusy(true); $('status').textContent = '正在准备本地资料…';
       let article, answer;
       if (action !== 'index') {
@@ -95,14 +98,23 @@
         article.append(el('div', 'question', question || (action === 'overview' ? '概括当前范围的研究方向、发现与空白' : '统计当前筛选范围')), answer); $('conversation').append(article);
         article.scrollIntoView({ block:'nearest' });
       }
+      const updates = answer ? app.createUIUpdater(text => {
+        if (!disposed && !window.closed && !stopRequested && jobID === id && answer.isConnected) answer.textContent = text;
+      }) : null;
+      answerUpdater = updates;
       try {
         const result = await api(action, { id: jobID, options: opts, question, profileSlot: Number($('profile').value), thinking, maxTokens: Number($('limit').value), history }, json => {
-          if (window.closed) return;
+          if (disposed || window.closed || stopRequested || jobID !== id) return;
           const event = JSON.parse(json);
           if (event.kind === 'progress') $('status').textContent = event.text;
           if (event.kind === 'scope') coverage(event.stats);
-          if (event.kind === 'answer' && answer) answer.textContent = event.text;
+          if (event.kind === 'answer') updates?.push(event.text);
         });
+        // The final Markdown and citation buttons must not be replaced by a
+        // scheduled plain-text update from the last streaming fragment.
+        updates?.cancel();
+        if (disposed || window.closed) return;
+        if (stopRequested) throw new Error('任务已停止。');
         if (action === 'index') { coverage(result); $('status').textContent = '本地索引已更新，未调用模型。'; return; }
         renderAnswer(answer, result); addSources(article, result);
         if (result.matchedItems != null) article.append(el("p", "muted", `所选范围 ${result.stats.items} 个条目；关键词匹配 ${result.matchedItems} 个；本轮实际提供 ${result.referencedItems} 个条目的资料。`));
@@ -119,20 +131,25 @@
         }
         $('status').textContent = result.incomplete ? '未完成：输出触及上限，部分结果已保留，可保存为笔记。未自动续写。' : '已完成。来源编号和来源列表均可点击定位。';
       } catch (error) {
+        updates?.cancel();
+        if (disposed || window.closed) return;
         const message = errorText(error);
         $('status').textContent = message;
         if (answer) { answer.textContent = '本次任务未完成：' + message; }
-      } finally { jobID = null; setBusy(false); }
+      } finally {
+        updates?.cancel(); if (answerUpdater === updates) answerUpdater = null;
+        jobID = null; if (!disposed && !window.closed) setBusy(false);
+      }
     };
     $('library').addEventListener('change', changeLibrary);
     $('mode').addEventListener('change', () => { $('collection-box').hidden = $('mode').value !== 'collection'; $('selection-box').hidden = $('mode').value !== 'selected'; });
     $('selection').addEventListener('click', async () => { try { const next = await api('options'); selected = next.selected; refreshSelected(); } catch (error) { $('status').textContent = errorText(error); } });
     for (const action of ['index','ask','overview','stats']) $(action).addEventListener('click', () => run(action));
-    $('stop').addEventListener('click', () => { if (jobID) app.stopLibraryTask(jobID); $('stop').disabled = true; $('status').textContent = '正在停止…'; });
+    $('stop').addEventListener('click', () => { stopRequested = true; cancelAnswerUpdates(); if (jobID) app.stopLibraryTask(jobID); $('stop').disabled = true; $('status').textContent = '正在停止…'; });
     $('settings').addEventListener('click', () => app.openPreferences());
-    $('clear').addEventListener('click', () => { for (const article of $('conversation').querySelectorAll('article')) article.remove(); history = []; $('empty').hidden = false; });
+    $('clear').addEventListener('click', () => { cancelAnswerUpdates(); for (const article of $('conversation').querySelectorAll('article')) article.remove(); history = []; $('empty').hidden = false; });
     $('question').addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); run('ask'); } });
-    window.addEventListener('unload', () => { if (jobID) app.stopLibraryTask(jobID); });
+    window.addEventListener('unload', () => { disposed = true; cancelAnswerUpdates(); if (jobID) app.stopLibraryTask(jobID); });
     setBusy(true);
     try {
       options = await api('options'); selected = options.selected;

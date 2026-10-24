@@ -27,8 +27,9 @@
     outputField.addEventListener("change", () => { limits[typeField.value] = Number(outputField.value); app.saveTaskSettings?.(typeField.value, { maxTokens: limits[typeField.value] }); });
     const taskConfig = () => ({ ...app.getConfig(), llmThinking: thinking, llmMaxTokens: limits[typeField.value] || 8192 });
     let busy = false;
-    let selection = [], stopRequested = false, currentJobID = null;
+    let selection = [], currentJobID = null;
     const selectionRows = new Map();
+    const itemTitle = item => (item?.isAttachment?.() ? item.attachmentFilename : "") || item?.getField?.("title");
     const pickedIDs = () => selection.filter(row => row.checked).map(row => row.id);
     const updateSelectionCount = () => {
       const count = pickedIDs().length;
@@ -38,42 +39,64 @@
       summaryButton.disabled = busy || count === 0;
     };
     const html = (tag) => document.createElementNS("http://www.w3.org/1999/xhtml", tag);
+    const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+    const taskViews = new Map();
     const renderTasks = () => {
+      if (window.closed) return;
       const data = app.getSummaryTasks();
       const running = data.items.filter((task) => task.status === "running");
-      document.getElementById("si-task-total").textContent = String(data.totals.created);
-      document.getElementById("si-task-running").textContent = String(running.length);
-      document.getElementById("si-task-completed").textContent = String(data.totals.completed);
-      document.getElementById("si-task-failed").textContent = String(data.totals.failed + data.totals.interrupted);
+      setText(document.getElementById("si-task-total"), String(data.totals.created));
+      setText(document.getElementById("si-task-running"), String(running.length));
+      setText(document.getElementById("si-task-completed"), String(data.totals.completed));
+      setText(document.getElementById("si-task-failed"), String(data.totals.failed + data.totals.interrupted));
       for (const [containerID, tasks, emptyText] of [
         ["si-task-active-list", running, "当前没有进行中的文献任务。"],
         ["si-task-history-list", data.items.filter((task) => task.status !== "running"), "尚无历史任务。"]
       ]) {
         const container = document.getElementById(containerID);
-        container.replaceChildren();
+        let view = taskViews.get(containerID);
+        if (!view) { view = { rows: new Map(), order: null }; taskViews.set(containerID, view); }
         if (!tasks.length) {
-          const label = html("span"); label.className = "si-task-empty"; label.textContent = emptyText; container.append(label);
+          if (view.order !== "empty") {
+            const label = html("span"); label.className = "si-task-empty"; label.textContent = emptyText;
+            container.replaceChildren(); container.append(label); view.order = "empty"; view.rows.clear();
+          }
+          continue;
         }
-        for (const task of tasks) {
-          const row = html("div"); row.className = "si-task-row"; row.dataset.status = task.status;
-          const title = html("button"); title.textContent = task.title; title.type = "button";
-          title.className = "si-task-link";
-          title.title = "在文献库中定位此文献";
-          title.addEventListener("click", async () => {
-            try { await app.locateSummaryTask(task); }
-            catch (error) { status.textContent = error.message; }
-          });
-          const detail = html("small");
+        const keys = tasks.map((task, index) => task.id || `${task.createdAt}:${task.itemID}:${index}`);
+        const keep = new Set(keys);
+        for (const key of view.rows.keys()) if (!keep.has(key)) view.rows.delete(key);
+        for (const [index, task] of tasks.entries()) {
+          const key = keys[index];
+          let entry = view.rows.get(key);
+          if (!entry) {
+            const row = html("div"), title = html("button"), detail = html("small");
+            row.className = "si-task-row"; title.type = "button"; title.className = "si-task-link";
+            title.title = "在文献库中定位此文献";
+            entry = { row, title, detail, task, resume: null }; view.rows.set(key, entry);
+            title.addEventListener("click", async () => {
+              try { await app.locateSummaryTask(entry.task); }
+              catch (error) { status.textContent = error.message; }
+            });
+            row.append(title, detail);
+          }
+          entry.task = task;
+          const { row, title, detail } = entry;
+          if (row.dataset.status !== task.status) row.dataset.status = task.status;
+          if (title.textContent !== task.title) title.textContent = task.title;
           const state = { running: "进行中", completed: task.promptType === "auto_highlight" ? "高亮处理完成" : "已完成并保存笔记", failed: "失败", interrupted: task.noteID ? "未完成 · 部分已保存" : "中断" }[task.status] || task.status;
           const ms = task.durationMs ?? (task.status === "interrupted" ? null : task.finishedAt ? Date.parse(task.finishedAt) - Date.parse(task.createdAt) : Date.now() - Date.parse(task.createdAt));
           const seconds = Math.max(0, Math.round(ms / 1000));
           const elapsed = ms === null || !Number.isFinite(ms) ? "耗时未记录" : `总耗时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
-          detail.textContent = `${state} · ${task.promptType === "auto_highlight" ? "文献高亮标记" : task.promptType === "table_summary" ? "表格总结" : "文献总结"} · ${elapsed} · 配置 ${task.profileSlot} · ${new Date(task.createdAt).toLocaleString("zh-CN")} · ${task.stage || ""}`;
-          row.append(title, detail);
-          if (["interrupted", "failed"].includes(task.status) && task.itemID && ["paper_summary", "table_summary", "auto_highlight"].includes(task.promptType)) {
-            const resume = html("button"); resume.type = "button"; resume.textContent = "继续任务"; resume.disabled = busy;
+          entry.dateLabel ||= new Date(task.createdAt).toLocaleString("zh-CN");
+          const description = `${state} · ${task.promptType === "auto_highlight" ? "文献高亮标记" : task.promptType === "table_summary" ? "表格总结" : "文献总结"} · ${elapsed} · 配置 ${task.profileSlot} · ${entry.dateLabel} · ${task.stage || ""}`;
+          if (detail.textContent !== description) detail.textContent = description;
+          const resumable = ["interrupted", "failed"].includes(task.status) && task.itemID && ["paper_summary", "table_summary", "auto_highlight"].includes(task.promptType);
+          if (resumable && !entry.resume) {
+            const resume = html("button"); resume.type = "button"; resume.textContent = "继续任务";
             resume.addEventListener("click", async () => {
               if (busy) return;
+              const task = entry.task;
               typeField.value = task.promptType;
               app.saveLastSummaryType?.(task.promptType);
               if (task.profileSlot) app.setActiveProfile(task.profileSlot);
@@ -83,9 +106,14 @@
               window.siLoadSelection([task.itemID]);
               await summarize();
             });
-            row.append(resume);
+            row.append(resume); entry.resume = resume;
           }
-          container.append(row);
+          if (entry.resume) { entry.resume.disabled = busy; entry.resume.hidden = !resumable; }
+        }
+        const order = JSON.stringify(keys);
+        if (view.order !== order) {
+          container.replaceChildren(); container.append(...keys.map(key => view.rows.get(key).row));
+          view.order = order;
         }
       }
     };
@@ -124,7 +152,7 @@
     const refresh = () => {
       const firstID = pickedIDs()[0];
       const item = firstID ? Zotero.Items.get(firstID) : null;
-      itemLabel.textContent = pickedIDs().length > 1 ? `本次处理 ${pickedIDs().length} 篇文献` : item?.getField?.("title") || item?.attachmentFilename ||
+      itemLabel.textContent = pickedIDs().length > 1 ? `本次处理 ${pickedIDs().length} 个文献 / PDF` : itemTitle(item) ||
         "未选择文献。请在 Zotero 文献列表中选择条目。";
       const config = app.getConfig();
       profileField.replaceChildren();
@@ -148,7 +176,7 @@
         const row = html("div"); row.className = "si-selection-row";
         const label = html("label"), checkbox = html("input"), name = html("span"), state = html("small");
         checkbox.type = "checkbox"; checkbox.checked = true;
-        name.textContent = item?.getField?.("title") || item?.attachmentFilename || `文献 ${entry.id}`;
+        name.textContent = itemTitle(item) || `文献 ${entry.id}`;
         state.textContent = "待处理";
         checkbox.addEventListener("change", () => { if (!busy) { entry.checked = checkbox.checked; updateSelectionCount(); refresh(); } });
         label.append(checkbox, name); row.append(label, state); list.append(row);
@@ -193,166 +221,97 @@
       updateSelectionCount();
     };
     const requestPause = () => {
-      stopRequested = true;
-      document.getElementById("si-batch-stop").disabled = true;
-      if (currentJobID) app.cancelTask?.(currentJobID);
-      document.getElementById("si-summary-dialog-hint").textContent = "正在暂停；已完成的分段会保留，稍后可继续任务。";
-      status.textContent = "已请求暂停当前任务。";
+      if (currentJobID) app.cancelDashboardJob(currentJobID);
     };
     document.getElementById("si-batch-stop").addEventListener("click", requestPause);
     document.getElementById("si-dialog-pause").addEventListener("click", requestPause);
 
-    const runBatch = async () => {
-      const ids = pickedIDs(), type = typeField.value, config = taskConfig(), prompt = promptField.value;
-      setQueueBusy(true); stopRequested = false; resultView.replaceChildren();
-      currentJobID = `batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const stopButton = document.getElementById("si-batch-stop"); stopButton.hidden = false; stopButton.disabled = false;
-      const dialog = document.getElementById("si-summary-dialog"), progress = document.getElementById("si-summary-progress");
-      const title = document.getElementById("si-summary-dialog-title"), hint = document.getElementById("si-summary-dialog-hint");
-      title.textContent = "正在批量处理文献";
-      hint.textContent = "关闭提示后队列继续运行；可点击“暂停任务”，稍后继续剩余文献。";
-      progress.textContent = `准备处理 ${ids.length} 篇文献…`; if (!window.closed && !dialog.open) dialog.showModal();
-      for (const id of ids) { const row = selectionRows.get(id); row.state.textContent = "等待中"; row.row.dataset.status = "queued"; }
-      try {
-        const totals = JSON.parse(await app.runBatch(ids, type, config, prompt, json => {
-          const event = JSON.parse(json), row = selectionRows.get(event.itemID);
-          if (event.kind === "progress") {
-            progress.textContent = `[${event.index}/${event.total}] ${event.title}\n${event.message}`;
-            status.textContent = progress.textContent;
-            if (row) { row.state.textContent = "处理中"; row.row.dataset.status = "running"; }
-          } else if (event.kind === "item") {
-            const state = { partial: "未完成（已保存）", completed: "已完成", failed: "失败", skipped: "重复跳过", stopped: "未执行" }[event.status];
-            if (row) { row.state.textContent = state; row.row.dataset.status = event.status; }
-            const details = html("details"), heading = html("summary"), message = html("p");
-            details.className = "si-batch-result";
-            details.open = true;
-            heading.textContent = `${event.title || `文献 ${event.itemID}`} · ${state}`;
-            message.textContent = event.message; details.append(heading, message);
-            if (event.result?.markdown) { const content = html("div"); app.renderMarkdown(content, event.result.markdown); details.append(content); }
-            for (const h of event.result?.highlights || []) {
-              const quote = html("blockquote"); quote.textContent = `【${h.category}】第 ${h.pageLabel} 页：${h.text}`; details.append(quote);
-            }
-            resultView.append(details);
+    let displayedJobID = null, displayedResultRevision = -1, displayedStatus = null, launching = false;
+    const batchResultViews = new Map();
+    const stateLabels = { queued: "等待中", running: "处理中", partial: "未完成（已保存）", completed: "已完成", failed: "失败", skipped: "重复跳过", stopped: "已暂停 / 未执行" };
+    const renderResults = job => {
+      if (displayedResultRevision === job.resultRevision) return;
+      displayedResultRevision = job.resultRevision;
+      const data = JSON.parse(app.getDashboardJobResults(job.id));
+      if (job.kind === "batch") {
+        const keep = new Set(data.items.map(event => event.itemID));
+        for (const id of batchResultViews.keys()) if (!keep.has(id)) batchResultViews.delete(id);
+        for (const event of data.items) {
+          const previous = batchResultViews.get(event.itemID);
+          if (previous && previous.previewOmitted === !!event.previewOmitted) continue;
+          const details = html("details"), heading = html("summary"), message = html("p");
+          details.className = "si-batch-result"; details.open = true;
+          heading.textContent = `${event.title || `文献 ${event.itemID}`} · ${stateLabels[event.status] || event.status}`;
+          message.textContent = event.message + (event.previewOmitted ? " 完整结果请在文献中查看。" : "");
+          details.append(heading, message);
+          if (event.result?.markdown) { const content = html("div"); app.renderMarkdown(content, event.result.markdown); details.append(content); }
+          for (const h of event.result?.highlights || []) {
+            const quote = html("blockquote"); quote.textContent = `【${h.category}】第 ${h.pageLabel} 页：${h.text}`; details.append(quote);
           }
-          renderTasks();
-        }, () => stopRequested || window.closed, { id: currentJobID }));
-        title.textContent = totals.stopped ? "批处理已停止" : "批处理已结束";
-        progress.textContent = `成功 ${totals.completed} 篇 · 未完成并保存 ${totals.partial || 0} 篇 · 失败 ${totals.failed} 篇 · 重复跳过 ${totals.skipped} 篇 · 未执行 ${totals.stopped} 篇`;
-        status.textContent = progress.textContent; hint.textContent = totals.stopped ? "已保留未完成队列，点击“继续批处理”即可续跑。" : "每篇结果可在下方展开查看；失败文献可重新勾选后重试。";
-      } catch (error) {
-        title.textContent = "批处理失败"; progress.textContent = app.describeError(error);
-        status.textContent = progress.textContent; hint.textContent = "队列已停止，可根据错误提示重试。";
-      } finally {
-        currentJobID = null; stopButton.hidden = true; setQueueBusy(false); renderTasks(); renderBatchResume();
-        if (!window.closed && !dialog.open) dialog.showModal();
+          batchResultViews.set(event.itemID, { details, previewOmitted: !!event.previewOmitted });
+        }
+        resultView.replaceChildren();
+        resultView.append(...data.items.map(event => batchResultViews.get(event.itemID).details));
+        return;
       }
-    };
-
-    const summarize = async () => {
-      if (busy) return;
-      if (pickedIDs().length > 1) return runBatch();
-      const item = refresh();
-      if (!item) { status.textContent = "请先在文献列表中选择条目。"; return; }
-      setQueueBusy(true);
-      const selectedRow = selectionRows.get(item.id);
-      if (selectedRow) { selectedRow.state.textContent = "处理中"; selectedRow.row.dataset.status = "running"; }
-      const actionType = typeField.value;
-      const highlight = actionType === "auto_highlight";
-      const actionName = highlight ? "文献高亮" : "总结";
-      const capturedPrompt = promptField.value;
       resultView.replaceChildren();
-      summaryButton.disabled = true;
-      typeField.disabled = true;
-      profileField.disabled = true;
-      const dialog = document.getElementById("si-summary-dialog");
-      const progress = document.getElementById("si-summary-progress");
-      const dialogTitle = document.getElementById("si-summary-dialog-title");
-      const dialogHint = document.getElementById("si-summary-dialog-hint");
-      dialogHint.textContent = "关闭提示后任务会继续运行，可在“文献任务”中查看进度。";
-      dialogTitle.textContent = highlight ? "正在标记文献" : "正在生成总结";
-      progress.textContent = "任务已开始，正在读取文献。长文会分组分析，可能需要更多时间与 Token。";
-      if (!window.closed && !dialog.open) dialog.showModal();
-      let taskID = null, signal = null;
-      const stopButton = document.getElementById("si-batch-stop"); stopButton.hidden = false; stopButton.disabled = false;
-      stopRequested = false;
-      let lastStage = "准备任务";
-      try {
-        if (!highlight) app.saveSummaryPrompt(actionType, capturedPrompt);
-        const config = taskConfig();
-        taskID = app.startSummaryTask({
-          title: item.getField?.("title") || item.attachmentFilename || "未命名文献",
-          promptType: actionType, profileSlot: config.llmSlot, itemID: item.parentID || item.id,
-          settings: { thinking: config.llmThinking, maxTokens: config.llmMaxTokens }, prompt: capturedPrompt
-        });
-        currentJobID = taskID;
-        signal = app.beginTask?.(taskID);
-        renderTasks();
-        const report = (message) => {
-          lastStage = message;
-          status.textContent = message;
-          progress.textContent = message;
-          app.updateSummaryTask(taskID, { stage: message });
-          renderTasks();
-        };
-        if (highlight) {
-          const response = JSON.parse(await app.highlightItem(item, report, config, { signal }));
-          if (!response.ok) { const error = new Error(response.error || `失败阶段：${lastStage}；底层组件未提供错误详情`); error.cancelled = response.cancelled; throw error; }
-          const result = response.result;
-          const message = result.count
-            ? `已添加 ${result.count} 条高亮，本次标记约占可提取原文的 ${result.percent}%。`
-            : "未新增高亮：没有通过原文、去重及比例检查的候选内容，或已达到标记上限。";
-          status.textContent = message + (result.emptyPages ? ` ${result.emptyPages} 页无文字层，仅分析可提取的原文。` : "");
-          const resultTitle = html("p"); resultTitle.textContent = status.textContent; resultView.append(resultTitle);
-          for (const h of result.highlights) {
-            const entry = html("div"); entry.className = "si-highlight-result";
-            entry.style.borderLeftColor = h.color;
-            const label = html("strong"); label.textContent = `【${h.category}】第 ${h.pageLabel} 页`;
-            const quote = html("blockquote"); quote.textContent = h.text;
-            entry.append(label, quote); resultView.append(entry);
-          }
-          app.updateSummaryTask(taskID, { status: "completed", stage: status.textContent });
-        } else {
-        const result = await app.summarizeItem(item, actionType, report, config, capturedPrompt, { signal });
-        app.checkTaskSignal?.(signal);
-        app.renderMarkdown(resultView, result.markdown);
-        app.updateSummaryTask(taskID, { stage: "正在保存文献笔记…" });
-        renderTasks();
-        const note = await app.saveSummary(result, { signal });
-        app.updateSummaryTask(taskID, { status: result.incomplete ? "interrupted" : "completed", stage: result.incomplete ? "未完成：部分结果已保存" : "文献笔记已保存", noteID: note?.id || null });
-        renderTasks();
-        status.textContent = (result.incomplete ? "未完成：已达到输出上限，部分结果已保存到笔记。" : "总结已生成并保存到当前文献笔记。") + (result.timings ? ` 正文准备 ${(result.timings.extractionMs/1000).toFixed(1)} 秒${result.timings.cached ? "（复用）" : ""}，模型生成 ${(result.timings.modelMs/1000).toFixed(1)} 秒。` : "");
+      if (data.result?.markdown) {
+        app.renderMarkdown(resultView, data.result.markdown);
+      } else if (data.result?.highlights) {
+        const title = html("p"); title.textContent = data.result.message; resultView.append(title);
+        for (const h of data.result.highlights) {
+          const entry = html("div"), label = html("strong"), quote = html("blockquote");
+          entry.className = "si-highlight-result"; entry.style.borderLeftColor = h.color;
+          label.textContent = `【${h.category}】第 ${h.pageLabel} 页`; quote.textContent = h.text;
+          entry.append(label, quote); resultView.append(entry);
         }
-        renderTasks();
-        dialogTitle.textContent = status.textContent.startsWith("未完成") ? "未完成 · 部分结果已保存" : `${actionName}已完成`;
-        if (selectedRow) { selectedRow.state.textContent = status.textContent.startsWith("未完成") ? "未完成" : "已完成"; selectedRow.row.dataset.status = status.textContent.startsWith("未完成") ? "partial" : "completed"; }
-        dialogHint.textContent = "任务已结束，可以关闭提示查看结果。";
-        progress.textContent = status.textContent;
-        if (!window.closed && !dialog.open) dialog.showModal();
-      } catch (error) {
-        const paused = app.isTaskCancelled?.(error, signal) || signal?.aborted || error?.cancelled;
-        const detail = paused ? "任务已暂停；已完成分段已保留，可在历史任务中点击“继续任务”。" : app.describeError(error);
-        if (selectedRow) { selectedRow.state.textContent = paused ? "已暂停" : "失败"; selectedRow.row.dataset.status = paused ? "stopped" : "failed"; }
-        const message = detail.includes("失败阶段：") ? detail : `失败阶段：${lastStage}\n原因：${detail}`;
-        status.textContent = paused ? detail : `${actionName}失败：${message}`;
-        dialogTitle.textContent = paused ? "任务已暂停" : `${actionName}失败`;
-        dialogHint.textContent = paused ? "可从历史任务继续；已完成分段会自动复用。" : "任务已停止。解决问题后可重新点击按钮重试。";
-        progress.textContent = status.textContent;
-        if (!window.closed && !dialog.open) dialog.showModal();
-        // A failed history write must not prevent the original error being shown.
-        try {
-          if (taskID) app.updateSummaryTask(taskID, { status: paused ? "interrupted" : "failed", stage: paused ? detail : message });
-          renderTasks();
-        } catch (historyError) {
-          dialogHint.textContent = "任务已停止；历史记录更新失败，请保留上方错误信息。";
-          try { Zotero.logError(historyError); } catch (_) {}
-        }
-        if (!paused) { try { Zotero.logError(error); } catch (_) {} }
-      } finally {
-        if (taskID) app.finishTask?.(taskID);
-        currentJobID = null; stopButton.hidden = true;
-        setQueueBusy(false); renderTasks();
       }
     };
+    const renderJob = json => {
+      if (window.closed) return;
+      const job = JSON.parse(json);
+      if (!job) return;
+      const isNew = displayedJobID !== job.id, running = job.status === "running";
+      if (isNew) {
+        displayedJobID = job.id; displayedResultRevision = -1;
+        batchResultViews.clear();
+        // Reconnect the view to the exact IDs captured at launch, even when the
+        // library selection has changed while this window was closed.
+        busy = false;
+        if (job.kind !== "extract" && !launching) { typeField.value = job.type; loadPrompt(); }
+        window.siLoadSelection(job.ids);
+      }
+      currentJobID = running ? job.id : null;
+      if (isNew || busy !== running) setQueueBusy(running);
+      const stop = document.getElementById("si-batch-stop");
+      stop.hidden = !running; stop.disabled = !running || job.cancelling;
+      document.getElementById("si-dialog-pause").disabled = !running || job.cancelling;
+      setText(status, job.message);
+      setText(document.getElementById("si-summary-progress"), job.message);
+      setText(document.getElementById("si-summary-dialog-title"), job.title);
+      setText(document.getElementById("si-summary-dialog-hint"), job.hint);
+      for (const entry of job.rows) {
+        const view = selectionRows.get(entry.itemID);
+        if (!view) continue;
+        setText(view.state, stateLabels[entry.status] || entry.status);
+        if (view.row.dataset.status !== entry.status) view.row.dataset.status = entry.status;
+      }
+      renderResults(job); renderTasks(); renderBatchResume();
+      const dialog = document.getElementById("si-summary-dialog");
+      if ((isNew || displayedStatus === "running" && !running) && !dialog.open) dialog.showModal();
+      displayedStatus = job.status;
+    };
+    const launch = kind => {
+      if (busy) return;
+      if (!pickedIDs().length) { status.textContent = "请先在文献列表中选择条目。"; return; }
+      try {
+        launching = true;
+        app.startDashboardJob(JSON.stringify({ kind, ids: pickedIDs(), type: typeField.value, config: taskConfig(), prompt: promptField.value }));
+      } catch (error) { status.textContent = app.describeError(error); }
+      finally { launching = false; }
+    };
+    const runBatch = () => launch("summary");
+    const summarize = () => launch("summary");
 
     const renderBatchResume = () => {
       const queue = app.getBatchQueue?.();
@@ -374,16 +333,12 @@
       await runBatch();
     });
     renderBatchResume();
-    window.addEventListener("unload", () => { stopRequested = true; if (currentJobID) app.cancelTask?.(currentJobID); });
+    const unsubscribe = app.subscribeDashboardJob(renderJob);
+    window.addEventListener("unload", () => { unsubscribe(); }, { once: true });
 
     summaryButton.addEventListener("click", summarize);
     document.getElementById("si-summary-dialog-close").addEventListener("click", () => document.getElementById("si-summary-dialog").close());
-    document.getElementById("mineru-dashboard-extract").addEventListener("click", () => {
-      const item = refresh();
-      if (!item) { status.textContent = "请先在文献列表中选择条目。"; return; }
-      app.handleExtractMarkdown(item);
-      status.textContent = "正在提取 PDF 正文，请查看 Zotero 进度提示。";
-    });
+    document.getElementById("mineru-dashboard-extract").addEventListener("click", () => launch("extract"));
     document.getElementById("mineru-dashboard-preferences").addEventListener("click", () => app.openPreferences());
   }, { once: true });
 })();

@@ -14,7 +14,11 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
   }
   const doc = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, createElementNS: node };
   let load, release, located, tracked, saved, lastUpdate;
-  const app = {
+  const Zotero = { Prefs: { get() {}, set() {} }, Items: { get: id => id ? ({ id, getField: () => 'Paper' }) : null }, logError() {} };
+  const background = vm.createContext({ AbortController, Zotero, setTimeout, clearTimeout });
+  vm.runInContext(fs.readFileSync('plugin_src/chrome/content/scripts/main.js', 'utf8'), background);
+  const app = background.ZoteroMinerUAI;
+  Object.assign(app, {
     describeError: error => error?.message || error?.name || String(error || "底层组件未提供错误详情"),
     getSummaryTasks: () => ({ totals: { created: 1, completed: 1, failed: 0, interrupted: 0 }, items: [{ title: 'Paper', status: 'completed', itemID: 3, durationMs: 65000, createdAt: new Date().toISOString() }] }),
     getHighlightRules: () => '高亮规则',
@@ -34,9 +38,9 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
     saveSummaryPrompt() {}, startSummaryTask(task) { tracked = task; return 'task'; }, updateSummaryTask(_id, change) { lastUpdate=change; },
     summarizeItem: async (_item, _type, progress) => { progress('正在分析全文第 1 / 2 段…'); await new Promise(resolve => { release = resolve; }); if (fail) throw new Error('测试失败'); return { markdown: '总结', incomplete }; },
     renderMarkdown() {}, saveSummary: async result => { saved=result;return { id: 9 }; }, locateSummaryTask: async (task) => { located = task.itemID; }
-  };
+  });
   vm.runInNewContext(fs.readFileSync('plugin_src/chrome/content/scripts/dashboard.js', 'utf8'), {
-    window: { addEventListener(name, fn) { if (name === 'load') load = fn; } }, document: doc, Zotero: { MinerUAI: app, Items: { get: id => id ? ({ id, getField: () => 'Paper' }) : null }, logError() {} }
+    window: { addEventListener(name, fn) { if (name === 'load') load = fn; } }, document: doc, Zotero
   });
   load();
   if (highlight) {
@@ -55,11 +59,12 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
     assert.equal(nodes.get('si-summary').disabled, true);
     nodes.get('si-selection-all').listeners.click();
     assert.match(nodes.get('si-summary').textContent, /2 篇/);
-    const pending = nodes.get('si-summary').listeners.click();
+    nodes.get('si-summary').listeners.click();
+    for (let i = 0; !release && i < 30; i++) await Promise.resolve();
     assert.equal(nodes.get('si-selection-refresh').disabled, true);
     assert.equal(nodes.get('si-batch-stop').hidden, false);
     if (fail) nodes.get('si-batch-stop').listeners.click();
-    release(); await pending;
+    release(); await app.dashboardRun;
     assert.equal(nodes.get('si-summary-dialog-title').textContent, fail ? '批处理已停止' : '批处理已结束');
     assert.equal(nodes.get('mineru-dashboard-result').children.length, 2);
     assert.equal(nodes.get('si-batch-stop').hidden, true);
@@ -67,7 +72,8 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
     assert.equal(nodes.get('si-summary').disabled, false);
     return;
   }
-  const pending = nodes.get('si-summary').listeners.click();
+  nodes.get('si-summary').listeners.click();
+  for (let i = 0; !release && i < 30; i++) await Promise.resolve();
   assert.equal(nodes.get('si-summary-dialog').open, true);
   assert.match(nodes.get('si-summary-dialog-hint').textContent, /任务会继续运行/);
   assert.equal(nodes.get('si-summary').disabled, true);
@@ -75,7 +81,7 @@ async function run(fail = false, highlight = false, batch = false, incomplete = 
   assert.match(nodes.get('si-summary-progress').textContent, highlight ? /正在核对原文/ : /第 1 \/ 2 段/);
   nodes.get('si-summary-dialog-close').listeners.click();
   assert.equal(nodes.get('si-summary-dialog').open, false);
-  release(); await pending;
+  release(); await app.dashboardRun;
   assert.equal(nodes.get('si-summary-dialog').open, true);
   assert.equal(nodes.get('si-summary').disabled, false);
   assert.equal(nodes.get('si-summary-dialog-title').textContent, incomplete ? '未完成 · 部分结果已保存' : (highlight ? '文献高亮' : '总结') + (fail ? '失败' : '已完成'));
