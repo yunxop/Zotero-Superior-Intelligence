@@ -132,14 +132,14 @@
           const { row, title, detail } = entry;
           if (row.dataset.status !== task.status) row.dataset.status = task.status;
           if (title.textContent !== task.title) title.textContent = task.title;
-          const state = { running: "进行中", completed: task.promptType === "auto_highlight" ? "高亮处理完成" : "已完成并保存笔记", failed: "失败", interrupted: task.noteID ? "未完成 · 部分已保存" : "中断" }[task.status] || task.status;
+          const state = { running: "进行中", completed: task.promptType === "paper_annotation" ? "已保存 HTML 附件" : task.promptType === "auto_highlight" ? "高亮处理完成" : "已完成并保存笔记", failed: "失败", interrupted: task.noteID ? "未完成 · 部分已保存" : "中断" }[task.status] || task.status;
           const ms = task.durationMs ?? (task.status === "interrupted" ? null : task.finishedAt ? Date.parse(task.finishedAt) - Date.parse(task.createdAt) : Date.now() - Date.parse(task.createdAt));
           const seconds = Math.max(0, Math.round(ms / 1000));
           const elapsed = ms === null || !Number.isFinite(ms) ? "耗时未记录" : `总耗时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
           entry.dateLabel ||= new Date(task.createdAt).toLocaleString("zh-CN");
-          const description = `${state} · ${task.promptType === "auto_highlight" ? "文献高亮标记" : task.promptType === "table_summary" ? "表格总结" : "文献总结"} · ${elapsed} · 配置 ${task.profileSlot} · ${entry.dateLabel} · ${task.stage || ""}`;
+          const description = `${state} · ${task.promptType === "paper_annotation" ? "双栏批注 HTML" : task.promptType === "auto_highlight" ? "文献高亮标记" : task.promptType === "table_summary" ? "表格总结" : "文献总结"} · ${elapsed} · 配置 ${task.profileSlot} · ${entry.dateLabel} · ${task.stage || ""}`;
           if (detail.textContent !== description) detail.textContent = description;
-          const resumable = ["interrupted", "failed"].includes(task.status) && task.itemID && ["paper_summary", "table_summary", "auto_highlight"].includes(task.promptType);
+          const resumable = ["interrupted", "failed"].includes(task.status) && task.itemID && ["paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(task.promptType);
           if (resumable && !entry.resume) {
             const resume = html("button"); resume.type = "button"; resume.textContent = "继续任务";
             resume.addEventListener("click", async () => {
@@ -160,6 +160,16 @@
             row.append(resume); entry.resume = resume;
           }
           if (entry.resume) { entry.resume.disabled = busy; entry.resume.hidden = !resumable; }
+          const hasHTML = task.promptType === "paper_annotation" && task.status === "completed" && task.attachmentID;
+          if (hasHTML && !entry.openHTML) {
+            const button = html("button"); button.type = "button"; button.textContent = "打开 HTML";
+            button.addEventListener("click", async () => {
+              try { await app.openPaperAnnotation(entry.task.attachmentID); }
+              catch (error) { status.textContent = error.message; }
+            });
+            row.append(button); entry.openHTML = button;
+          }
+          if (entry.openHTML) entry.openHTML.hidden = !hasHTML;
         }
         const order = JSON.stringify(keys);
         if (view.order !== order) {
@@ -373,7 +383,7 @@
       stop.hidden = !running; stop.disabled = !running || job.cancelling;
       const pause = document.getElementById("si-dialog-pause");
       pause.disabled = !running || job.cancelling;
-      setText(stop, job.kind === "annotation" ? "取消任务" : "暂停任务");
+      setText(stop, "暂停任务");
       setText(pause, stop.textContent);
       setText(document.getElementById("si-summary-progress"), job.message);
       setText(document.getElementById("si-summary-dialog-title"), job.title);

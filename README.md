@@ -1,4 +1,4 @@
-# Zotero Superior Intelligence · SI 2.1.0
+# Zotero Superior Intelligence · SI 2.2.0
 
 <div align="center">
 
@@ -10,10 +10,10 @@
 
 [![Free](https://img.shields.io/badge/插件-免费使用-brightgreen)](#free)
 [![Open Source](https://img.shields.io/badge/开源-AGPL--3.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/版本-2.1.0-blue)](#install)
+[![Version](https://img.shields.io/badge/版本-2.2.0-blue)](#install)
 [![Zotero](https://img.shields.io/badge/Zotero-10.0.x-red)](https://www.zotero.org/)
 
-[核心功能](#features) · [2.1.0 更新说明](docs/RELEASE_2.1.0.md) · [安装使用](#install) · [常见问题](#faq) · [English](#english)
+[核心功能](#features) · [2.2.0 更新说明](docs/RELEASE_2.2.0.md) · [安装使用](#install) · [常见问题](#faq) · [English](#english)
 
 </div>
 
@@ -65,6 +65,12 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 在 Zotero 选择一篇英文论文或其 PDF，打开 **SI 文献助手 → 文献分析**，将分析类型切换为 **双栏批注 HTML**。可修改并保存专用提示词，调整翻译风格或批注重点。插件将英文原文与中文译文排在左栏，右栏逐段说明段落功能、逻辑角色和论证技巧或漏洞。页面包含五色高亮图例、章节跳转与全文论证总览。
 
 生成完成后，点击 **在 Zotero 中打开 HTML**，也可双击文献下的 **双栏批注** 附件。单个文件包含排版和字体，可通过附件菜单中的 **显示文件** 取出，离线打开。分析使用 SI 当前模型配置，缺少文字层时使用 MinerU 提取。
+
+2.2.0 改进：没有标准章节标题的内容以“正文”继续分析；HTML 显示翻译段落数、仅保留原文的内容及原因，并为可定位的段落提供 PDF 页码链接。MinerU 输出没有页码时标注“页码未定位”。任务可暂停，并从“文献任务 → 历史任务 → 继续任务”恢复已校验的正文分组和总览阶段；原文、提示词或模型设置变化会重新分析。同一配置生成的可用附件会复用，历史任务也可直接打开 HTML。
+
+续跑记录使用现有的本地检查点缓存，最多保留 40 项、30 天并受 8 MiB 总容量限制；记录被清理或无法写入磁盘时，重启后可能需要重新生成。续跑仍会读取 PDF；扫描件可能再次调用 MinerU。
+
+2.2.0 保留解析结果中的 Markdown/HTML 表格和 TeX 公式，公式字体内嵌，可离线显示；宽表格在窄屏内横向滚动。表格与独立公式保留原始数据/原式，不要求模型重写。软连字符会恢复；普通断词仅在原文已有完整拼写时合并，否则保留连字符，并可展开整理前文本。打印会展开参考文献等附属内容，长表格重复表头。PDF 中未提取出结构的表格/公式仍以提取文本展示；图片暂保留原始标记，需回到 PDF 查看。
 
 ### ✍️ 科研语料提取：把读过的论文变成可复用的写作积累
 
@@ -129,11 +135,11 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 
 <a id="install"></a>
 
-## 安装 2.1.0
+## 安装 2.2.0
 
 **支持 Zotero 10.0.x。当前安装包不支持 Zotero 7/8/9。**
 
-1. 从 [GitHub Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 查看已发布安装包。**2.1.0 构建文件名为 `zotero-superior-intelligence-2.1.0.xpi`**。若 Releases 尚未提供该版本，可从源码构建。
+1. 从 [GitHub Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 查看已发布安装包。**2.2.0 构建文件名为 `zotero-superior-intelligence-2.2.0.xpi`**。若 Releases 尚未提供该版本，可从源码构建。
 2. 打开 Zotero → **工具 → 插件**，通过齿轮菜单选择“从文件安装插件”，选择 `.xpi` 文件。
 3. 重启 Zotero，在设置中打开 **Superior Intelligence (SI)**，配置模型接口并测试连接。
 4. 在文献列表右键打开 **SI 文献助手**，或从工具菜单打开 **SI** 工作台。
@@ -186,7 +192,7 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 git clone https://github.com/yunxop/Zotero-Superior-Intelligence.git
 cd Zotero-Superior-Intelligence
 python build_xpi.py
-# 输出 dist/zotero-superior-intelligence-2.1.0.xpi
+# 输出 dist/zotero-superior-intelligence-2.2.0.xpi
 ```
 
 开发测试使用 Node.js 22.13+ / 24，以及 Playwright：
@@ -199,7 +205,7 @@ npm run test:all
 npm run test:writing
 ```
 
-完整套件包含 **24 个测试脚本**，覆盖任务与恢复、原文核验、数据库迁移、主题整理、导出及浏览器交互。可用 `CHROME_PATH` 指定系统 Chrome；自动化测试不替代真实 Zotero 和真实 API 联调。
+完整套件包含 **27 个测试脚本**，覆盖任务与恢复、HTML 分组及总览续跑、页码来源、离线表格/公式、断词整理、打印内容、原文核验、数据库迁移、主题整理、导出及浏览器交互。可用 `CHROME_PATH` 指定系统 Chrome；自动化测试不替代真实 Zotero 和真实 API 联调。
 
 源码位于 `plugin_src/`，测试位于 `tests/`，构建输出位于 `dist/`。详见 [项目架构](PROJECT_ARCHITECTURE.md)。自动更新清单仅在对应 GitHub Release 附件可下载后更新。
 
@@ -207,7 +213,7 @@ npm run test:writing
 
 ## English
 
-**Zotero Superior Intelligence (SI) 2.1.0 is a free, open-source research assistant for Zotero 10.0.x. No plugin subscription, membership, or paid feature tier. Third-party API services may charge separately.**
+**Zotero Superior Intelligence (SI) 2.2.0 is a free, open-source research assistant for Zotero 10.0.x. No plugin subscription, membership, or paid feature tier. Third-party API services may charge separately.**
 
 - **Chat with PDFs:** ask follow-up questions in the reader sidebar, edit answers, and save Zotero notes.
 - **Highlight papers automatically:** create color-coded PDF annotations for findings, mechanisms, methods, research gaps, and reusable passages.
@@ -217,7 +223,7 @@ npm run test:writing
 
 The plugin stores the knowledge base locally in SQLite and Markdown. Cloud analysis sends relevant text to your configured providers. Local compatible LLM endpoints and keyword-only filtering are available. Scanned PDFs require OCR for source-linked extraction.
 
-See [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) for published builds. The 2.1.0 build artifact is `zotero-superior-intelligence-2.1.0.xpi`.
+See [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) for published builds. The 2.2.0 build artifact is `zotero-superior-intelligence-2.2.0.xpi`.
 
 ## 许可证与鸣谢
 

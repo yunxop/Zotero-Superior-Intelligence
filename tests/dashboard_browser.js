@@ -215,6 +215,41 @@ const dashboardHTML = '<!doctype html><meta charset="utf-8"><style>body{margin:0
     await frame.getByRole('button', { name: '在 Zotero 中打开 HTML' }).click();
     assert.deepEqual(await page.evaluate(() => window.annotationRequest), { item: 12, prompt: '强调证据与结论的对应关系。', maxTokens: 16384 });
     assert.equal(await page.evaluate(() => window.openedAttachment), 311);
+    assert.match(await frame.locator('#si-task-history-list').textContent(), /已保存 HTML 附件 · 双栏批注 HTML/);
+    await close(frame);
+    // A restarted dashboard can open the saved attachment from persistent history.
+    await page.evaluate(() => { Zotero.MinerUAI.dashboardJob = null; window.openedAttachment = null; });
+    frame = await open();
+    await frame.locator('#si-tab-tasks').click();
+    await frame.locator('.si-task-history > summary').click();
+    await frame.getByRole('button', { name: '打开 HTML', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.openedAttachment), 311);
+    await close(frame);
+    await page.evaluate(() => {
+      window.annotationCalls = [];
+      SIPaperAnnotation.create = async (item, prompt, config, report, signal, options) => {
+        annotationCalls.push({ item: item.id, prompt, maxTokens: config.llmMaxTokens });
+        options.onAttachment(14);
+        if (annotationCalls.length === 1) throw Error('second group failed');
+        return { attachmentID: 312 };
+      };
+      Zotero.MinerUAI.startDashboardJob(JSON.stringify({ ids: [12], kind: 'summary', type: 'paper_annotation',
+        config: { llmSlot: 1, llmThinking: false, llmMaxTokens: 4096 }, prompt: '续跑时保留的批注要求' }));
+    });
+    await page.evaluate(() => Zotero.MinerUAI.dashboardRun);
+    const failedAnnotation = await page.evaluate(() => Zotero.MinerUAI.getSummaryTasks().items[0]);
+    assert.equal(failedAnnotation.status, 'failed');
+    assert.equal(failedAnnotation.itemID, 14, 'pin the actual PDF before failure');
+    frame = await open();
+    await frame.locator('#si-tab-tasks').click();
+    await frame.locator('.si-task-history > summary').click();
+    const failedRow = frame.locator('#si-task-history-list .si-task-row').filter({ hasText: '双栏批注 HTML' }).filter({ hasText: '失败' });
+    await failedRow.getByRole('button', { name: '继续任务' }).click();
+    await page.evaluate(() => Zotero.MinerUAI.dashboardRun);
+    assert.deepEqual(await page.evaluate(() => window.annotationCalls), [
+      { item: 12, prompt: '续跑时保留的批注要求', maxTokens: 4096 },
+      { item: 14, prompt: '续跑时保留的批注要求', maxTokens: 4096 }
+    ]);
     await close(frame);
     assert.deepEqual(errors, []);
     console.log('dashboard browser passed: tabs, task replay/resume, presets/drafts, editable HTML prompt and attachment opening');

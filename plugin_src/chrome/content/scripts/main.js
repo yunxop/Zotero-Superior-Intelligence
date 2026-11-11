@@ -372,7 +372,7 @@ var ZoteroMinerUAI = {
     const job = this.dashboardJob;
     if (!job || job.snapshot.id !== id || job.snapshot.status !== "running") return;
     this.cancelTask(id);
-    this.publishDashboardJob(job, { cancelling: true, message: job.snapshot.kind === "annotation" ? "正在取消双栏批注任务…" : "正在暂停；已完成的分段会保留，稍后可继续任务。" });
+    this.publishDashboardJob(job, { cancelling: true, message: "正在暂停；已完成的分段会保留，稍后可继续任务。" });
   },
   async openPaperAnnotation(id) {
     const attachment = Zotero.Items.get(id);
@@ -401,7 +401,7 @@ var ZoteroMinerUAI = {
     const id = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const job = { snapshot: { id, kind, ids, type: input.type, promptPreset: input.promptPreset, status: "running", cancelling: false,
       title: annotation ? "正在生成双栏批注 HTML" : kind === "extract" ? "正在提取 PDF 正文" : kind === "batch" ? "正在批量处理文献" : input.type === "auto_highlight" ? "正在标记文献" : "正在生成总结",
-      message: "任务已开始，正在读取文献。", hint: annotation ? "关闭 SI 窗口后任务会继续。可重新打开查看进度或取消。" : "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
+      message: "任务已开始，正在读取文献。", hint: "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
       rows: ids.map(itemID => ({ itemID, status: "queued" })), revision: 0, resultRevision: 0 },
       prompt: String(input.prompt || ""), results: { result: null, items: [] } };
     const signal = this.beginTask(id);
@@ -466,7 +466,13 @@ var ZoteroMinerUAI = {
       if (!item || item.deleted) throw new Error("文献不存在或已删除。");
       row(item.id, "running");
       if (kind === "annotation") {
-        const result = await SIPaperAnnotation.create(item, prompt, config, report, signal);
+        taskID = this.startSummaryTask({ title: (item.isAttachment?.() ? item.attachmentFilename : "") || item.getField?.("title") || "未命名文献",
+          promptType: type, profileSlot: config.llmSlot, itemID: item.id,
+          settings: { thinking: config.llmThinking, maxTokens: config.llmMaxTokens }, prompt });
+        const result = await SIPaperAnnotation.create(item, prompt, config, report, signal, {
+          onAttachment: itemID => this.updateSummaryTask(taskID, { itemID })
+        });
+        this.updateSummaryTask(taskID, { status: "completed", stage: "HTML 附件已保存", attachmentID: result.attachmentID });
         this.retainDashboardResult(job, result);
         row(item.id, "completed");
         this.publishDashboardJob(job, { status: "completed", title: "双栏批注已完成",
@@ -510,13 +516,13 @@ var ZoteroMinerUAI = {
     } catch (error) {
       const paused = this.isTaskCancelled(error, signal);
       const annotation = kind === "annotation";
-      const detail = paused ? (annotation ? "已取消双栏批注任务。" : "任务已暂停；已完成分段已保留，可在历史任务中点击“继续任务”。") : this.describeError(error);
+      const detail = paused ? "任务已暂停；可在历史任务中点击“继续任务”，复用仍可用的分段记录。" : this.describeError(error);
       const message = paused || detail.includes("失败阶段：") ? detail : `失败阶段：${lastStage}\n原因：${detail}`;
       try { if (taskID) this.updateSummaryTask(taskID, { status: paused ? "interrupted" : "failed", stage: message }); }
       catch (historyError) { try { Zotero.logError(historyError); } catch (_) {} }
       for (const entry of job.snapshot.rows) if (["queued", "running"].includes(entry.status)) entry.status = paused ? "stopped" : "failed";
-      this.publishDashboardJob(job, { status: paused ? "paused" : "failed", title: paused ? (annotation ? "任务已取消" : "任务已暂停") : `${annotation ? "双栏批注" : kind === "batch" ? "批处理" : kind === "extract" ? "正文提取" : type === "auto_highlight" ? "文献高亮" : "总结"}失败`, message,
-        hint: annotation ? "可重新点击生成按钮启动任务。" : paused ? "可从历史任务继续；已完成分段会自动复用。" : "任务已停止。解决问题后可重新点击按钮重试。" });
+      this.publishDashboardJob(job, { status: paused ? "paused" : "failed", title: paused ? "任务已暂停" : `${annotation ? "双栏批注" : kind === "batch" ? "批处理" : kind === "extract" ? "正文提取" : type === "auto_highlight" ? "文献高亮" : "总结"}失败`, message,
+        hint: annotation || paused ? "可从历史任务继续；原文、提示词和模型设置一致时，复用仍可用的分段记录。" : "任务已停止。解决问题后可重新点击按钮重试。" });
       if (!paused) { try { Zotero.logError(error); } catch (_) {} }
     } finally {
       this.finishTask(id);
@@ -588,7 +594,7 @@ var ZoteroMinerUAI = {
       task.finishedAt = new Date().toISOString();
       task.durationMs = Math.max(0, Date.parse(task.finishedAt) - Date.parse(task.createdAt));
     }
-    for (const key of ["status", "stage", "noteID"]) {
+    for (const key of ["status", "stage", "noteID", "attachmentID", "itemID"]) {
       if (change[key] !== undefined) task[key] = change[key];
     }
     this.persistSummaryTasks(data);

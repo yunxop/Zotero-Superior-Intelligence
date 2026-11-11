@@ -30,9 +30,10 @@ const { chromium } = require('playwright');
     await page.evaluate(() => { document.getElementById('si-usage-scroll').scrollLeft = 100; window.reposition(); });
     await page.waitForTimeout(80);
     assert.equal(await page.locator('#si-usage-scroll').evaluate(el => el.scrollLeft), 100);
-    await page.evaluate(() => { document.getElementById('zotero-prefpane-mineru').style.display = 'none'; });
-    await page.waitForTimeout(80);
     await page.evaluate(() => {
+      // Hide, replace cells and reveal within one frame. Visibility observers
+      // may not see the hidden state; the new cells must still be positioned.
+      document.getElementById('zotero-prefpane-mineru').style.display = 'none';
       const calendar = document.getElementById('si-usage-calendar');
       calendar.innerHTML = calendar.innerHTML;
       window.reposition();

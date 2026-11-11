@@ -70,7 +70,7 @@ var MarkdownRenderer = {
           const tex = text.slice(index + left.length, close);
           if (tex.trim()) {
             const token = prefix + tokens.length + "\uE001";
-            tokens.push({ token, html: this.mathHTML(tex, display, text.slice(index, close + right.length), options), display });
+            tokens.push({ token, html: this.mathHTML(tex, display, text.slice(index, close + right.length), options), display, start: index, end: close + right.length });
             const inTable = /^\s*\|/.test(text.slice(text.lastIndexOf("\n", index - 1) + 1, index));
             output += display && options.block !== false && !inTable ? "\n" + token + "\n" : token;
             index = close + right.length; continue;

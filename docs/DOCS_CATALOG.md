@@ -23,4 +23,6 @@
 
 ## 新增使用说明
 
+- [RELEASE_2.2.0.md](RELEASE_2.2.0.md)：双栏批注 HTML 续跑、来源定位、表格与公式排版及打印改进。
+- [HTML_REVIEW_2.1.0_2026-11-11.md](HTML_REVIEW_2.1.0_2026-11-11.md)：2.1.0 HTML 审查结果、两轮修复与验证记录。
 - [TASK_CONTROLS.md](TASK_CONTROLS.md)：思考与 Token 设置保存、对话笔记保护、原生公式、任务暂停和跨重启续跑。

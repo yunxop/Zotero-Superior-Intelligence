@@ -40,3 +40,5 @@
 新增 `writing_core.js`、`writing_store.js`、`writing_service.js`、`writing_ui.js` 与 `writing.xhtml`。功能、存储与接口见 `docs/writing-knowledge.md`。
 
 2.0.0：新增 `writing_topics.js` 与 `writing_topic_ui.js`，负责主题迁移、管理、记录关联和提取历史。
+
+2.2.0 双栏批注：`paper_annotation.js` 负责提取、来源、模型分析与续跑；`paper_content.js` 负责安全内容块解析、断词整理、表格与公式排版。`styles/paper_math.css` 由 `build_xpi.py` 根据现有 KaTeX 样式和字体生成，包含字体 data URL，勿手工修改。HTML 仅在包含公式时内嵌这份样式。

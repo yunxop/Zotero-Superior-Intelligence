@@ -182,5 +182,25 @@ function openView(f) {
   await broken.app.dashboardRun;
   assert.equal(JSON.parse(broken.app.getDashboardJob()).status, 'failed');
   assert.equal(broken.app.taskControllers.size, 0);
+  // HTML generation joins the same persistent history and pins the resolved PDF.
+  const annotation = fixture();
+  annotation.context.SIPaperAnnotation = { create: async (_item, _prompt, _config, progress, signal, options) => {
+    options.onAttachment(14);
+    progress('正文分析第 2 组');
+    return new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+      const error = Error('paused'); error.name = 'AbortError'; reject(error);
+    }, { once: true }));
+  } };
+  const annotationJob = annotation.start([12], 'paper_annotation');
+  await until(() => annotation.app.getSummaryTasks().items[0]?.itemID === 14);
+  annotation.app.cancelDashboardJob(annotationJob.id);
+  await annotation.app.dashboardRun;
+  const history = annotation.app.getSummaryTasks().items[0];
+  assert.equal(history.status, 'interrupted');
+  assert.equal(history.promptType, 'paper_annotation');
+  assert.equal(history.itemID, 14);
+  assert.equal(history.prompt, 'prompt');
+  assert.equal(history.settings.maxTokens, 8192);
+  assert.doesNotMatch(JSON.stringify(history), /test-secret|mineru-secret/);
   console.log('background tasks passed: close before launch, save once, reopen progress/pause, batch continuation, highlight, extraction, subscriber isolation, errors and shutdown');
 })().catch(error => { console.error(error); process.exitCode = 1; });

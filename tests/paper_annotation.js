@@ -28,6 +28,8 @@ async function verifyLayout(html, rowCount) {
     await reference.locator('summary').click();
     assert.equal(await reference.locator('.source-excerpt').isVisible(), true);
     assert.equal(await page.locator('.translation mark').count(), 0);
+    assert.equal(await page.locator('.row .source-info a').count(), rowCount);
+    assert.match(await page.locator('.row .source-info a').first().getAttribute('href'), /zotero:\/\/open-pdf\/library\/items\/TESTPDF1\?page=1/);
     assert.equal(await page.locator('.translation').first().evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(240, 236, 226)');
     assert.ok(await page.locator('.row').first().evaluate(row => {
       const [text, note] = row.children;
@@ -74,7 +76,7 @@ async function verifyLayout(html, rowCount) {
     })).reverse() });
   };
   const signal = new AbortController().signal;
-  const pdf = { id: 7, libraryID: 2, getField: () => 'Paper <&>' };
+  const pdf = { id: 7, key: 'TESTPDF1', libraryID: 2, getField: () => 'Paper <&>' };
   const parent = { id: 4, isRegularItem: () => true, getField: () => 'Paper <&>' };
   const text = 'We examined 64 paired reports to evaluate the claim in Fig. 1.';
   const long = Array(400).fill('The limitation applies.').join(' ');
@@ -103,11 +105,13 @@ async function verifyLayout(html, rowCount) {
       return { markdown: '# Abstract\n' + text + '\n\n## Study design\nThe study compares samples.' };
     } },
     Zotero: {
-      Libraries: { get: () => ({ filesEditable: true }) },
+      Libraries: { get: () => ({ libraryType: 'user', filesEditable: true }) },
       File: { getResourceAsync: async url => read(url.replace('chrome://zoteromineru/content/', '')) }
     }
   });
-  vm.runInContext(read('scripts/paper_annotation.js'), context);
+  for (const file of ['vendor/katex.min.js', 'markdown_renderer.js', 'paper_content.js', 'paper_annotation.js']) {
+    vm.runInContext(read('scripts/' + file), context);
+  }
   const core = context.SIPaperAnnotation;
   const geometry = core.textFromLines(core.pageLines({ chars: [
     { c: 'A wrapped line', rect: [40, 680, 56, 692], lineBreakAfter: true },
@@ -150,6 +154,8 @@ async function verifyLayout(html, rowCount) {
   await core.create(pdf, prompt, {}, () => {}, signal);
   assert.equal(ocrCalls, 1);
   assert.ok(saved.html.includes('>Study design</h2>'));
+  assert.ok(saved.html.includes('页码未定位'), 'OCR without page metadata must not invent page links');
+  assert.ok(!saved.html.includes('?page='));
   context.LLMClient.complete = async () => '{"paragraphs":[]}';
   saved = null;
   await assert.rejects(core.create(pdf, prompt, {}, () => {}, signal), /漏掉了段落/);

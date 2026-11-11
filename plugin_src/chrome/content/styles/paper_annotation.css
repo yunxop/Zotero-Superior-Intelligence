@@ -16,6 +16,9 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.65 v
 .wrap { width: min(100% - 2.5rem, 73rem); margin-inline: auto; }
 .masthead { padding: clamp(2rem, 6vw, 4.5rem) 0 1.75rem; background: var(--navy); color: #fffaf0; }
 h1 { max-width: 27ch; margin: 0; font: 600 clamp(1.85rem, 4vw, 3.65rem)/1.16 var(--body); }
+.document-info { margin: .8rem 0 0; font-size: .85rem; }
+.source-info { margin: 0 0 .45rem; color: var(--muted); font: .8rem/1.6 var(--ui); }
+.source-info a { color: var(--navy); text-underline-offset: .15em; }
 h2 { margin: 0 0 .65rem; font: 600 clamp(1.25rem, 2.7vw, 1.85rem)/1.35 var(--body); }
 .legend { display: flex; flex-wrap: wrap; gap: .4rem .75rem; list-style: none; padding: 0; margin: 1.5rem 0 0; }
 .legend li { display: inline-flex; align-items: center; gap: .45rem; font-size: .85rem; }
@@ -36,12 +39,25 @@ main section + section { margin-top: 2.2rem; }
 .original { margin: 0; font: 400 1.03rem/1.85 var(--body); white-space: pre-wrap; }
 .source-excerpt { margin-block: .75rem; padding: .55rem .8rem; border-inline-start: 2px solid var(--line); color: var(--muted); font-size: .925rem; }
 .source-section summary { width: fit-content; cursor: pointer; color: var(--navy); font-size: .9rem; }
-.source-excerpt { margin-block: .75rem; padding: .55rem .8rem; border-inline-start: 2px solid var(--line); color: var(--muted); font-size: .925rem; }
-.source-section summary { width: fit-content; cursor: pointer; color: var(--navy); font-size: .9rem; }
 mark { padding: .05em .08em; border-radius: 2px; background: var(--highlight); color: inherit; box-decoration-break: clone; }
 .translation { position: relative; margin-top: 1.2rem; padding: .85rem 1rem; background: #f0ece2; border-inline-start: 2px solid #b5a68e; }
 .translation::before { content: ""; position: absolute; inset: -.65rem 0 auto -2px; border-top: 1px solid var(--line); }
 .translation p { margin: 0; font: 400 1rem/1.9 var(--body); white-space: pre-wrap; }
+.translation { font: 400 1rem/1.9 var(--body); white-space: pre-wrap; }
+.source-table { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+.source-table table { width: 100%; border-collapse: collapse; font-size: .925rem; background: #fffdf7; }
+.source-table th, .source-table td { min-width: 7rem; border: 1px solid var(--line); padding: .5rem .7rem; text-align: start; vertical-align: top; overflow-wrap: break-word; }
+.source-table th { background: #ede8dc; font-weight: 600; }
+.source-table caption { text-align: start; margin-bottom: .5rem; font-weight: 600; }
+.source-table:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.source-equation, .si-math-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: .2rem 0; }
+.si-math-inline { white-space: normal; }
+.si-math-error, .source-code, .source-figure pre, .extraction-source pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-figure { margin: 1rem 0; padding: .75rem; border: 1px dashed var(--line); }
+.source-figure figcaption, .extraction-source summary { color: var(--muted); font-size: .85rem; }
+.extraction-source { margin-block: .5rem; }
+.extraction-source summary { cursor: pointer; }
+.print-source { display: none; }
 .annotation { padding: .85rem 1rem; border-inline-start: 3px solid var(--accent, #647a8c); background: var(--tint, #edf0ef); }
 dl, dd { margin: 0; }
 dt { color: var(--navy); font-weight: 600; }
@@ -68,7 +84,28 @@ dt { color: var(--navy); font-weight: 600; }
   .argument-steps li + li::before { content: "↓"; inset: -1rem auto auto .75rem; }
 }
 @media print {
+  @page { margin: 14mm; }
+  body { background: white; font-size: 10pt; }
+  .wrap { width: 100%; }
   .masthead { background: white; color: var(--ink); }
-  .sections { display: none; }
-  .row { break-inside: avoid; }
+  .masthead { padding: 0 0 1rem; }
+  h1 { font-size: 24pt; max-width: none; }
+  .sections, .column-labels, .source-section, .extraction-source { display: none; }
+  .print-source { display: block; }
+  .row { display: block; break-inside: auto; }
+  .annotation { margin-top: .75rem; }
+  .source-table, .source-equation, .si-math-display { overflow: visible; }
+  .source-table table { table-layout: fixed; }
+  .source-table th, .source-table td { min-width: 0; overflow-wrap: anywhere; }
+  .source-table tr { break-inside: avoid; }
+  .source-table thead { display: table-header-group; }
+  .argument-steps, .verdicts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+  .argument-steps li, .verdicts div { margin-block: .6rem; }
+  .argument-steps li + li::before { content: none; }
+  h2, dt { break-after: avoid; }
+  .original, .translation { orphans: 3; widows: 3; }
+  .original, .translation { font-size: 10pt; line-height: 1.65; }
+  .annotation dd, .argument-steps p { font-size: 9.5pt; }
+  #argument { margin-block: 1.2rem; }
+  mark { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }

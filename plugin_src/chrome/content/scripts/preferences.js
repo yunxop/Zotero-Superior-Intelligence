@@ -197,6 +197,7 @@
     const amount = (value) => Number(value || 0).toLocaleString("zh-CN");
     const tokens = (value) => Number(value || 0) > 1000 ? `${(Number(value) / 1000).toFixed(1).replace(/\.0$/, "")}k` : amount(value);
     let positionedUsageYear = null;
+    let positionedUsageCell = null;
     const usageScroll = doc.getElementById("si-usage-scroll");
     let positioningFrame = null;
     const scheduleUsagePosition = () => {
@@ -209,9 +210,9 @@
           positionedUsageYear = null;
           return;
         }
-        if (positionedUsageYear === year) return;
         // Query the current render: focus events can replace cells before this frame.
         const todayCell = calendar.querySelector('[data-today="true"]');
+        if (positionedUsageYear === year && positionedUsageCell === todayCell) return;
         if (todayCell) {
           const cell = todayCell.getBoundingClientRect();
           if (!cell.width || !cell.height) return;
@@ -226,6 +227,7 @@
           usageScroll.scrollLeft = 0;
         }
         positionedUsageYear = year;
+        positionedUsageCell = todayCell;
       });
     };
     // Zotero inserts preference panes before revealing them. Observe the actual
