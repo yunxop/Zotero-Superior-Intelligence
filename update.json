@@ -3,6 +3,10 @@
     "zotero-mineru-ai@custom.org": {
       "updates": [
         {
+          "version": "2.1.0",
+          "update_link": "https://github.com/yunxop/Zotero-Superior-Intelligence/releases/download/v2.1.0/zotero-superior-intelligence-2.1.0.xpi"
+        },
+        {
           "version": "2.0.0",
           "update_link": "https://github.com/yunxop/Zotero-Superior-Intelligence/releases/download/v2.0.0/zotero-superior-intelligence-2.0.0.xpi"
         },
