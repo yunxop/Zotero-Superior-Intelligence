@@ -1,4 +1,4 @@
-# Zotero Superior Intelligence · SI 2.0.0
+# Zotero Superior Intelligence · SI 2.1.0
 
 <div align="center">
 
@@ -10,10 +10,10 @@
 
 [![Free](https://img.shields.io/badge/插件-免费使用-brightgreen)](#free)
 [![Open Source](https://img.shields.io/badge/开源-AGPL--3.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/版本-2.0.0-blue)](#install)
+[![Version](https://img.shields.io/badge/版本-2.1.0-blue)](#install)
 [![Zotero](https://img.shields.io/badge/Zotero-10.0.x-red)](https://www.zotero.org/)
 
-[核心功能](#features) · [2.0.0 新功能](#v2) · [安装使用](#install) · [常见问题](#faq) · [English](#english)
+[核心功能](#features) · [2.1.0 更新说明](docs/RELEASE_2.1.0.md) · [安装使用](#install) · [常见问题](#faq) · [English](#english)
 
 </div>
 
@@ -59,6 +59,12 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 | 🟪 紫色 | 可引用的概括性表达 |
 
 在原文里查看和复核标记，减少反复翻找重点的时间。[查看自动高亮说明](docs/AUTO_HIGHLIGHT.md)
+
+### 双栏批注 HTML
+
+在 Zotero 选择一篇英文论文或其 PDF，打开 **SI 文献助手 → 文献分析**，将分析类型切换为 **双栏批注 HTML**。可修改并保存专用提示词，调整翻译风格或批注重点。插件将英文原文与中文译文排在左栏，右栏逐段说明段落功能、逻辑角色和论证技巧或漏洞。页面包含五色高亮图例、章节跳转与全文论证总览。
+
+生成完成后，点击 **在 Zotero 中打开 HTML**，也可双击文献下的 **双栏批注** 附件。单个文件包含排版和字体，可通过附件菜单中的 **显示文件** 取出，离线打开。分析使用 SI 当前模型配置，缺少文字层时使用 MinerU 提取。
 
 ### ✍️ 科研语料提取：把读过的论文变成可复用的写作积累
 
@@ -119,15 +125,15 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 
 | SI 科研工作台 | 跨文献检索与对话 |
 | --- | --- |
-| ![SI 科研工作台](docs/ui-preview/token-usage.png) | ![跨文献检索与对话](docs/ui-preview/library-chat.png) |
+| ![SI 科研工作台](docs/ui-preview/dashboard-tabs.png) | ![跨文献检索与对话](docs/ui-preview/library-chat.png) |
 
 <a id="install"></a>
 
-## 安装 2.0.0
+## 安装 2.1.0
 
 **支持 Zotero 10.0.x。当前安装包不支持 Zotero 7/8/9。**
 
-1. 从 [GitHub Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 查看已发布安装包。**2.0.0 构建文件名：`zotero-superior-intelligence-2.0.0.xpi`**。若 Releases 尚未提供该版本，可从源码构建。
+1. 从 [GitHub Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) 查看已发布安装包。**2.1.0 构建文件名为 `zotero-superior-intelligence-2.1.0.xpi`**。若 Releases 尚未提供该版本，可从源码构建。
 2. 打开 Zotero → **工具 → 插件**，通过齿轮菜单选择“从文件安装插件”，选择 `.xpi` 文件。
 3. 重启 Zotero，在设置中打开 **Superior Intelligence (SI)**，配置模型接口并测试连接。
 4. 在文献列表右键打开 **SI 文献助手**，或从工具菜单打开 **SI** 工作台。
@@ -138,6 +144,7 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 | --- | --- |
 | PDF 对话 | 打开 PDF，在阅读器侧边栏进入 SI 对话 |
 | 自动标记 / 总结 | 选择文献，在 SI 工作台选择对应任务 |
+| 双栏批注 HTML | SI 工作台 → 文献分析 → 双栏批注 HTML |
 | 跨论文对话 | SI 工作台 → 文献库对话 |
 | 语料与证据提取 | SI 工作台 → 科研写作知识库 → 读取范围 → 填写主题与指令 → 开始提取 |
 | 跨子分类提取 | 在 Zotero 选中父分类，范围选择“当前分类及全部子分类”，读取范围后开始 |
@@ -179,7 +186,7 @@ AI 选择值得保留的原句，插件核验原文并利用文字坐标生成 Z
 git clone https://github.com/yunxop/Zotero-Superior-Intelligence.git
 cd Zotero-Superior-Intelligence
 python build_xpi.py
-# 输出：dist/zotero-superior-intelligence-2.0.0.xpi
+# 输出 dist/zotero-superior-intelligence-2.1.0.xpi
 ```
 
 开发测试使用 Node.js 22.13+ / 24，以及 Playwright：
@@ -200,7 +207,7 @@ npm run test:writing
 
 ## English
 
-**Zotero Superior Intelligence (SI) 2.0.0 is a free, open-source research assistant for Zotero 10.0.x. No plugin subscription, membership, or paid feature tier. Third-party API services may charge separately.**
+**Zotero Superior Intelligence (SI) 2.1.0 is a free, open-source research assistant for Zotero 10.0.x. No plugin subscription, membership, or paid feature tier. Third-party API services may charge separately.**
 
 - **Chat with PDFs:** ask follow-up questions in the reader sidebar, edit answers, and save Zotero notes.
 - **Highlight papers automatically:** create color-coded PDF annotations for findings, mechanisms, methods, research gaps, and reusable passages.
@@ -210,7 +217,7 @@ npm run test:writing
 
 The plugin stores the knowledge base locally in SQLite and Markdown. Cloud analysis sends relevant text to your configured providers. Local compatible LLM endpoints and keyword-only filtering are available. Scanned PDFs require OCR for source-linked extraction.
 
-See [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) for published builds. The 2.0.0 build artifact is `zotero-superior-intelligence-2.0.0.xpi`.
+See [Releases](https://github.com/yunxop/Zotero-Superior-Intelligence/releases) for published builds. The 2.1.0 build artifact is `zotero-superior-intelligence-2.1.0.xpi`.
 
 ## 许可证与鸣谢
 

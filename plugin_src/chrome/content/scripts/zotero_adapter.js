@@ -119,6 +119,23 @@ var ZoteroAdapter = {
     return noteItem;
   },
 
+  async saveHTMLAttachment(html, title, parent, libraryID, signal) {
+    const file = Zotero.getTempDirectory().clone();
+    file.append("si-paper-annotation.html");
+    file.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o600);
+    try {
+      await IOUtils.writeUTF8(file.path, html);
+      LLMClient.throwIfAborted(signal);
+      return await Zotero.Attachments.importFromFile({
+        file, title, libraryID, parentItemID: parent?.id,
+        fileBaseName: "paper-annotation", contentType: "text/html", charset: "utf-8"
+      });
+    } finally {
+      try { await IOUtils.remove(file.path, { ignoreAbsent: true }); }
+      catch (error) { Zotero.logError(error); }
+    }
+  },
+
   /** Save the current reader conversation as a readable Zotero note. */
   async saveConversationNote(attachment, history, existingNoteID = null) {
     if (!history?.length) throw new Error("当前还没有可以保存的对话。");

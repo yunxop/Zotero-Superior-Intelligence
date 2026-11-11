@@ -7,7 +7,10 @@ const load = () => {
 };
 let app = load();
 assert.equal(app.getTaskSettings('paper_summary').thinking,false);
+assert.equal(app.getTaskSettings('paper_summary').maxTokens,16384);
 assert.equal(app.getTaskSettings('table_summary').maxTokens,16384);
+assert.equal(app.getTaskSettings('auto_highlight').maxTokens,16384);
+assert.equal(app.getTaskSettings('paper_annotation').maxTokens,16384);
 app.saveTaskSettings('paper_summary',{thinking:true,maxTokens:32768});
 app.saveTaskSettings('table_summary',{maxTokens:4096});
 app.saveTaskSettings('library',{maxTokens:16384});

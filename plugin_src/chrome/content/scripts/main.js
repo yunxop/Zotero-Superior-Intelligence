@@ -302,12 +302,13 @@ var ZoteroMinerUAI = {
     try { stored = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.taskSettings", true) || "{}"); }
     catch (_) { stored = {}; }
     const value = Number(stored?.limits?.[type]);
+    const dashboardTask = ["paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(type);
     return { thinking: stored?.thinking === true,
-      maxTokens: [4096, 8192, 16384, 32768].includes(value) ? value : type === "table_summary" ? 16384 : 8192 };
+      maxTokens: [4096, 8192, 16384, 32768].includes(value) ? value : dashboardTask ? 16384 : 8192 };
   },
 
   saveTaskSettings(type, change) {
-    if (!["reader", "library", "paper_summary", "table_summary", "auto_highlight"].includes(type)) throw new Error("未知任务类型。");
+    if (!["reader", "library", "paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(type)) throw new Error("未知任务类型。");
     let stored;
     try { stored = JSON.parse(Zotero.Prefs.get("extensions.zoteromineru.taskSettings", true) || "{}"); }
     catch (_) { stored = {}; }
@@ -324,10 +325,10 @@ var ZoteroMinerUAI = {
 
   getLastSummaryType() {
     const type = Zotero.Prefs.get("extensions.zoteromineru.lastSummaryType", true);
-    return ["paper_summary", "table_summary", "auto_highlight"].includes(type) ? type : "paper_summary";
+    return ["paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(type) ? type : "paper_summary";
   },
   saveLastSummaryType(type) {
-    if (["paper_summary", "table_summary", "auto_highlight"].includes(type)) Zotero.Prefs.set("extensions.zoteromineru.lastSummaryType", type, true);
+    if (["paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(type)) Zotero.Prefs.set("extensions.zoteromineru.lastSummaryType", type, true);
   },
 
   beginTask(id) {
@@ -371,7 +372,12 @@ var ZoteroMinerUAI = {
     const job = this.dashboardJob;
     if (!job || job.snapshot.id !== id || job.snapshot.status !== "running") return;
     this.cancelTask(id);
-    this.publishDashboardJob(job, { cancelling: true, message: "正在暂停；已完成的分段会保留，稍后可继续任务。" });
+    this.publishDashboardJob(job, { cancelling: true, message: job.snapshot.kind === "annotation" ? "正在取消双栏批注任务…" : "正在暂停；已完成的分段会保留，稍后可继续任务。" });
+  },
+  async openPaperAnnotation(id) {
+    const attachment = Zotero.Items.get(id);
+    if (attachment?.deleted || attachment?.attachmentReaderType !== "snapshot") throw new Error("找不到双栏批注附件。");
+    await Zotero.Reader.open(id);
   },
   startDashboardJob(inputJSON) {
     if (this.shuttingDown) throw new Error("插件正在关闭，无法启动任务。");
@@ -381,7 +387,9 @@ var ZoteroMinerUAI = {
     const ids = [...new Set((input.ids || []).filter(id => Number.isInteger(id) && id > 0))];
     if (!ids.length) throw new Error("请先在文献列表中选择条目。");
     if (!["summary", "extract"].includes(input.kind)) throw new Error("不支持的任务类型。");
-    if (input.kind !== "extract" && !["paper_summary", "table_summary", "auto_highlight"].includes(input.type)) throw new Error("不支持的任务类型。");
+    if (input.kind !== "extract" && !["paper_summary", "table_summary", "auto_highlight", "paper_annotation"].includes(input.type)) throw new Error("不支持的任务类型。");
+    const annotation = input.kind === "summary" && input.type === "paper_annotation";
+    if (annotation && ids.length !== 1) throw new Error("双栏批注每次处理一篇，请只勾选一篇文献或一个 PDF。");
     input.promptPreset = input.kind !== "extract" && input.type === "paper_summary"
       ? this.validateSummaryPromptPreset(input.promptPreset ?? this.getSummaryPromptPreset()) : null;
     if (input.kind !== "extract" && input.type !== "auto_highlight") {
@@ -389,11 +397,11 @@ var ZoteroMinerUAI = {
       if (!input.prompt.trim()) throw new Error("提示词不能为空。");
     }
     if (input.kind === "extract") ids.splice(1);
-    const kind = input.kind === "extract" ? "extract" : ids.length > 1 ? "batch" : "single";
+    const kind = input.kind === "extract" ? "extract" : annotation ? "annotation" : ids.length > 1 ? "batch" : "single";
     const id = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const job = { snapshot: { id, kind, ids, type: input.type, promptPreset: input.promptPreset, status: "running", cancelling: false,
-      title: kind === "extract" ? "正在提取 PDF 正文" : kind === "batch" ? "正在批量处理文献" : input.type === "auto_highlight" ? "正在标记文献" : "正在生成总结",
-      message: "任务已开始，正在读取文献。", hint: "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
+      title: annotation ? "正在生成双栏批注 HTML" : kind === "extract" ? "正在提取 PDF 正文" : kind === "batch" ? "正在批量处理文献" : input.type === "auto_highlight" ? "正在标记文献" : "正在生成总结",
+      message: "任务已开始，正在读取文献。", hint: annotation ? "关闭 SI 窗口后任务会继续。可重新打开查看进度或取消。" : "关闭 SI 窗口后任务会继续运行；重新打开可查看进度，点击“暂停任务”可停止。",
       rows: ids.map(itemID => ({ itemID, status: "queued" })), revision: 0, resultRevision: 0 },
       prompt: String(input.prompt || ""), results: { result: null, items: [] } };
     const signal = this.beginTask(id);
@@ -457,6 +465,14 @@ var ZoteroMinerUAI = {
       const item = Zotero.Items.get(ids[0]);
       if (!item || item.deleted) throw new Error("文献不存在或已删除。");
       row(item.id, "running");
+      if (kind === "annotation") {
+        const result = await SIPaperAnnotation.create(item, prompt, config, report, signal);
+        this.retainDashboardResult(job, result);
+        row(item.id, "completed");
+        this.publishDashboardJob(job, { status: "completed", title: "双栏批注已完成",
+          message: "已保存单文件 HTML 附件。", hint: "点击「在 Zotero 中打开 HTML」阅读，也可以从文献库打开附件。" });
+        return;
+      }
       if (kind === "extract") {
         const result = await this.handleExtractMarkdown(item, { id, signal, config, onProgress: report });
         row(item.id, result.ok ? "completed" : result.cancelled ? "stopped" : "failed");
@@ -493,13 +509,14 @@ var ZoteroMinerUAI = {
       this.publishDashboardJob(job, { status: incomplete ? "partial" : "completed", title: incomplete ? "未完成 · 部分结果已保存" : `${highlight ? "文献高亮" : "总结"}已完成`, message, hint: "任务已结束，可以关闭提示查看结果。" });
     } catch (error) {
       const paused = this.isTaskCancelled(error, signal);
-      const detail = paused ? "任务已暂停；已完成分段已保留，可在历史任务中点击“继续任务”。" : this.describeError(error);
+      const annotation = kind === "annotation";
+      const detail = paused ? (annotation ? "已取消双栏批注任务。" : "任务已暂停；已完成分段已保留，可在历史任务中点击“继续任务”。") : this.describeError(error);
       const message = paused || detail.includes("失败阶段：") ? detail : `失败阶段：${lastStage}\n原因：${detail}`;
       try { if (taskID) this.updateSummaryTask(taskID, { status: paused ? "interrupted" : "failed", stage: message }); }
       catch (historyError) { try { Zotero.logError(historyError); } catch (_) {} }
       for (const entry of job.snapshot.rows) if (["queued", "running"].includes(entry.status)) entry.status = paused ? "stopped" : "failed";
-      this.publishDashboardJob(job, { status: paused ? "paused" : "failed", title: paused ? "任务已暂停" : `${kind === "batch" ? "批处理" : kind === "extract" ? "正文提取" : type === "auto_highlight" ? "文献高亮" : "总结"}失败`, message,
-        hint: paused ? "可从历史任务继续；已完成分段会自动复用。" : "任务已停止。解决问题后可重新点击按钮重试。" });
+      this.publishDashboardJob(job, { status: paused ? "paused" : "failed", title: paused ? (annotation ? "任务已取消" : "任务已暂停") : `${annotation ? "双栏批注" : kind === "batch" ? "批处理" : kind === "extract" ? "正文提取" : type === "auto_highlight" ? "文献高亮" : "总结"}失败`, message,
+        hint: annotation ? "可重新点击生成按钮启动任务。" : paused ? "可从历史任务继续；已完成分段会自动复用。" : "任务已停止。解决问题后可重新点击按钮重试。" });
       if (!paused) { try { Zotero.logError(error); } catch (_) {} }
     } finally {
       this.finishTask(id);
@@ -596,13 +613,15 @@ var ZoteroMinerUAI = {
     return id;
   },
   summaryPromptPreference(type, presetID) {
-    if (!["paper_summary", "table_summary"].includes(type)) throw new Error("不支持的提示词类型。");
+    if (!["paper_summary", "table_summary", "paper_annotation"].includes(type)) throw new Error("不支持的提示词类型。");
+    if (type === "paper_annotation") return "extensions.zoteromineru.paperAnnotationPrompt";
     if (type === "table_summary") return "extensions.zoteromineru.tableSummaryPrompt";
     this.validateSummaryPromptPreset(presetID);
     // Keep the existing preference as the general preset, without destructive migration.
     return `extensions.zoteromineru.paperSummaryPrompt${presetID === "general" ? "" : `.${presetID}`}`;
   },
   defaultSummaryPrompt(type, presetID) {
+    if (type === "paper_annotation") return SIPaperAnnotation.defaultPrompt;
     if (type === "paper_summary" && presetID !== "general") return LLMClient.PAPER_SUMMARY_PRESETS.find(preset => preset.id === presetID).prompt;
     return LLMClient.PROMPT_TEMPLATES[type];
   },

@@ -7,6 +7,33 @@
 
   window.addEventListener("load", () => {
     const app = Zotero.MinerUAI;
+    const workspace = document.getElementById("mineru-dashboard-content");
+    const tabs = ["analysis", "tasks", "tools", "settings"].map(key => ({
+      key, button: document.getElementById(`si-tab-${key}`), panel: document.getElementById(`si-panel-${key}`)
+    }));
+    const activateTab = key => {
+      for (const tab of tabs) {
+        const active = tab.key === key;
+        tab.button.setAttribute("aria-selected", String(active));
+        tab.button.tabIndex = active ? 0 : -1;
+        tab.panel.hidden = !active;
+      }
+      workspace.scrollTop = 0;
+    };
+    for (const [index, tab] of tabs.entries()) {
+      tab.button.addEventListener("click", () => activateTab(tab.key));
+      tab.button.addEventListener("keydown", event => {
+        const targets = {
+          ArrowLeft: (index + tabs.length - 1) % tabs.length,
+          ArrowRight: (index + 1) % tabs.length, Home: 0, End: tabs.length - 1
+        };
+        if (!Object.hasOwn(targets, event.key)) return;
+        event.preventDefault();
+        const next = tabs[targets[event.key]];
+        activateTab(next.key);
+        next.button.focus();
+      });
+    }
     document.getElementById("si-library-chat")?.addEventListener("click", () => app.openLibraryChat());
     document.getElementById("si-writing-knowledge")?.addEventListener("click", () => app.openWritingKnowledge());
     const args = window.arguments?.[0];
@@ -27,25 +54,33 @@
     };
     const profileField = document.getElementById("si-dashboard-profile");
     const thinkingButton = document.getElementById("si-thinking"), outputField = document.getElementById("si-output-limit");
-    const limits = { paper_summary: 8192, table_summary: 16384, auto_highlight: 8192 };
+    const defaultLimit = 16384;
+    const limits = {};
     typeField.value = app.getLastSummaryType?.() || typeField.value || "paper_summary";
     let thinking = app.getTaskSettings?.(typeField.value)?.thinking === true;
     const paintThinking = () => { thinkingButton.textContent = thinking ? "思考：开启" : "思考：关闭"; thinkingButton.setAttribute("aria-pressed", String(thinking)); };
     paintThinking();
     thinkingButton.addEventListener("click", () => { thinking = !thinking; app.saveTaskSettings?.(typeField.value, { thinking }); paintThinking(); });
     outputField.addEventListener("change", () => { limits[typeField.value] = Number(outputField.value); app.saveTaskSettings?.(typeField.value, { maxTokens: limits[typeField.value] }); });
-    const taskConfig = () => ({ ...app.getConfig(), llmThinking: thinking, llmMaxTokens: limits[typeField.value] || 8192 });
+    const taskConfig = () => ({ ...app.getConfig(), llmThinking: thinking, llmMaxTokens: limits[typeField.value] || defaultLimit });
     let busy = false;
     let selection = [], currentJobID = null;
     const selectionRows = new Map();
+    const extractButton = document.getElementById("mineru-dashboard-extract");
     const itemTitle = item => (item?.isAttachment?.() ? item.attachmentFilename : "") || item?.getField?.("title");
     const pickedIDs = () => selection.filter(row => row.checked).map(row => row.id);
     const updateSelectionCount = () => {
-      const count = pickedIDs().length;
+      const ids = pickedIDs(), count = ids.length;
+      const annotation = typeField.value === "paper_annotation";
       document.getElementById("si-selection-count").textContent = `已勾选 ${count} / ${selection.length} 篇`;
-      if (count > 1) summaryButton.textContent = `批量${typeField.value === "auto_highlight" ? "高亮" : typeField.value === "table_summary" ? "生成表格总结" : "总结"}（${count} 篇）`;
+      if (annotation) summaryButton.textContent = "生成双栏批注 HTML";
+      else if (count > 1) summaryButton.textContent = `批量${typeField.value === "auto_highlight" ? "高亮" : typeField.value === "table_summary" ? "生成表格总结" : "总结"}（${count} 篇）`;
       else summaryButton.textContent = typeField.value === "auto_highlight" ? "为所选文献添加高亮" : "生成并保存到文献笔记";
-      summaryButton.disabled = busy || count === 0;
+      summaryButton.disabled = busy || count === 0 || (annotation && count > 1);
+      extractButton.disabled = busy || count === 0;
+      document.getElementById("si-extract-selection").textContent = count
+        ? `提取目标：${itemTitle(Zotero.Items.get(ids[0])) || `文献 ${ids[0]}`}${count > 1 ? "（所勾选的第一篇）" : ""}`
+        : "请先在「文献分析」勾选一篇文献或 PDF。";
     };
     const html = (tag) => document.createElementNS("http://www.w3.org/1999/xhtml", tag);
     for (const preset of promptPresets) {
@@ -119,6 +154,7 @@
               loadPrompt();
               if (task.prompt && task.promptType !== "auto_highlight") promptField.value = task.prompt;
               window.siLoadSelection([task.itemID]);
+              activateTab("analysis");
               await summarize();
             });
             row.append(resume); entry.resume = resume;
@@ -137,8 +173,11 @@
     const loadPrompt = () => {
       const saved = app.getTaskSettings?.(typeField.value);
       if (saved) { thinking = saved.thinking; limits[typeField.value] = saved.maxTokens; paintThinking(); }
-      outputField.value = String(limits[typeField.value] || 8192);
+      outputField.value = String(limits[typeField.value] || defaultLimit);
+      const typeLabel = typeField.selectedOptions?.[0]?.textContent;
+      if (typeLabel) document.getElementById("si-output-label").textContent = `${typeLabel}输出上限`;
       const highlight = typeField.value === "auto_highlight";
+      const annotation = typeField.value === "paper_annotation";
       const paper = typeField.value === "paper_summary";
       presetField.value = currentPreset;
       document.getElementById("si-prompt-preset-box").hidden = !paper;
@@ -150,11 +189,12 @@
       document.getElementById("si-prompt-save").hidden = highlight;
       document.getElementById("si-prompt-reset").hidden = highlight;
       document.getElementById("si-highlight-legend").hidden = !highlight;
-      summaryButton.textContent = highlight ? "为所选文献添加高亮" : "生成并保存到文献笔记";
-      document.getElementById("si-action-help").textContent = highlight
+      document.getElementById("si-action-help").textContent = annotation
+        ? "每次勾选一篇论文。可修改翻译和论证批注的侧重点，结果保存为单个 HTML 附件。无文字层的 PDF 使用当前 MinerU 配置提取。"
+        : highlight
         ? "将按以上规则标记所选文献的 PDF 原句，目标约 5%–15%，宁少勿滥；重复内容会跳过。需要可定位文字层，长文将分组分析并使用当前模型的 Token。"
         : "提示词可编辑，点击“保存提示词”后下次打开仍保留；各总结角度独立保存。生成结果自动保存为文献子笔记。";
-      resultView.dataset.mode = highlight ? "highlight" : "summary";
+      resultView.dataset.mode = annotation ? "annotation" : highlight ? "highlight" : "summary";
       updateSelectionCount();
     };
     loadPrompt();
@@ -245,7 +285,7 @@
       document.getElementById("si-dialog-pause").hidden = !value;
       document.getElementById("si-dialog-pause").disabled = !value;
       document.getElementById("si-batch-resume").disabled = value;
-      for (const id of ["si-thinking", "si-output-limit", "si-selection-refresh", "si-selection-all", "si-selection-none", "si-summary-type", "si-prompt-preset", "si-dashboard-profile", "si-summary-prompt", "si-prompt-save", "si-prompt-reset", "mineru-dashboard-extract"]) document.getElementById(id).disabled = value;
+      for (const id of ["si-thinking", "si-output-limit", "si-selection-refresh", "si-selection-all", "si-selection-none", "si-summary-type", "si-prompt-preset", "si-dashboard-profile", "si-summary-prompt", "si-prompt-save", "si-prompt-reset"]) document.getElementById(id).disabled = value;
       selectionRows.forEach(row => { row.checkbox.disabled = value; });
       updateSelectionCount();
     };
@@ -256,12 +296,21 @@
     document.getElementById("si-dialog-pause").addEventListener("click", requestPause);
 
     let displayedJobID = null, displayedResultRevision = -1, launching = false;
+    let attachmentID = null;
+    const openAnnotation = document.getElementById("si-open-annotation");
+    openAnnotation.addEventListener("click", async () => {
+      if (!attachmentID) return;
+      try { await app.openPaperAnnotation(attachmentID); }
+      catch (error) { status.textContent = app.describeError(error); }
+    });
     const batchResultViews = new Map();
     const stateLabels = { queued: "等待中", running: "处理中", partial: "未完成（已保存）", completed: "已完成", failed: "失败", skipped: "重复跳过", stopped: "已暂停 / 未执行" };
     const renderResults = job => {
       if (displayedResultRevision === job.resultRevision) return;
       displayedResultRevision = job.resultRevision;
       const data = JSON.parse(app.getDashboardJobResults(job.id));
+      attachmentID = job.kind === "annotation" ? data.result?.attachmentID : null;
+      openAnnotation.hidden = !attachmentID;
       if (job.kind === "batch") {
         const keep = new Set(data.items.map(event => event.itemID));
         for (const id of batchResultViews.keys()) if (!keep.has(id)) batchResultViews.delete(id);
@@ -302,6 +351,7 @@
       if (!job) return;
       const isNew = displayedJobID !== job.id, running = job.status === "running";
       if (isNew) {
+        setText(status, "");
         displayedJobID = job.id; displayedResultRevision = -1;
         batchResultViews.clear();
         // Active jobs restore their captured controls; old results must not
@@ -312,8 +362,7 @@
             rememberDraft(); typeField.value = job.type;
             if (job.type === "paper_summary") currentPreset = job.promptPreset || "general";
             loadPrompt();
-            const captured = app.getDashboardJobPrompt(job.id);
-            if (job.type !== "auto_highlight") promptField.value = captured;
+            if (job.type !== "auto_highlight") promptField.value = app.getDashboardJobPrompt(job.id);
           }
           window.siLoadSelection(job.ids);
         }
@@ -322,8 +371,10 @@
       if (isNew || busy !== running) setQueueBusy(running);
       const stop = document.getElementById("si-batch-stop");
       stop.hidden = !running; stop.disabled = !running || job.cancelling;
-      document.getElementById("si-dialog-pause").disabled = !running || job.cancelling;
-      setText(status, job.message);
+      const pause = document.getElementById("si-dialog-pause");
+      pause.disabled = !running || job.cancelling;
+      setText(stop, job.kind === "annotation" ? "取消任务" : "暂停任务");
+      setText(pause, stop.textContent);
       setText(document.getElementById("si-summary-progress"), job.message);
       setText(document.getElementById("si-summary-dialog-title"), job.title);
       setText(document.getElementById("si-summary-dialog-hint"), job.hint);
@@ -387,7 +438,7 @@
       if (!dialog.open) dialog.showModal();
     });
     document.getElementById("si-summary-dialog-close").addEventListener("click", () => document.getElementById("si-summary-dialog").close());
-    document.getElementById("mineru-dashboard-extract").addEventListener("click", () => launch("extract"));
+    extractButton.addEventListener("click", () => launch("extract"));
     document.getElementById("mineru-dashboard-preferences").addEventListener("click", () => app.openPreferences());
   }, { once: true });
 })();

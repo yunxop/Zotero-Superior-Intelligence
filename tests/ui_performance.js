@@ -87,7 +87,7 @@ const source = name => fs.readFileSync('plugin_src/chrome/content/scripts/' + na
   nodes.get('si-batch-stop').listeners.click(); await app.dashboardRun;
   assert.equal(parsingSignal.aborted, true); assert.equal(noteWrites, 0); assert.equal(app.taskControllers.size, 0);
   assert.equal(nodes.get('mineru-dashboard-extract').disabled, false);
-  assert.match(nodes.get('mineru-dashboard-status').textContent, /取消/);
+  assert.match(nodes.get('si-job-message').textContent, /取消/);
   parsingSignal = null;
   nodes.get('mineru-dashboard-extract').listeners.click();
   for (let i = 0; !parsingSignal && i < 30; i++) await Promise.resolve();

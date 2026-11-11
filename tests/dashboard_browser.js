@@ -34,7 +34,7 @@ const dashboardHTML = '<!doctype html><meta charset="utf-8"><style>body{margin:0
           getField: () => `Paper ${id}` } : null }, logError() {}
       };
     });
-    for (const name of ['error_utils.js', 'llm_client.js', 'main.js']) await page.addScriptTag({ content: source(name) });
+    for (const name of ['error_utils.js', 'llm_client.js', 'paper_annotation.js', 'main.js']) await page.addScriptTag({ content: source(name) });
     await page.evaluate(() => {
       const app = Zotero.MinerUAI;
       Object.assign(app, {
@@ -153,8 +153,10 @@ const dashboardHTML = '<!doctype html><meta charset="utf-8"><style>body{margin:0
     await frame.locator('#si-batch-stop').click();
     await page.evaluate(() => Zotero.MinerUAI.dashboardRun);
     assert.equal(await frame.evaluate(() => modalOpens), 0);
+    await frame.getByRole('tab', { name: '文献任务' }).click();
     await frame.locator('.si-task-history > summary').click();
     await frame.locator('#si-task-history-list button').filter({ hasText: '继续任务' }).first().click();
+    assert.equal(await frame.locator('#si-tab-analysis').getAttribute('aria-selected'), 'true');
     await page.waitForFunction(() => operations.length === 3);
     assert.equal(await page.evaluate(() => operations[2].prompt), '暂停续跑必须保留的原始提示词');
     assert.equal(await page.evaluate(() => Zotero.MinerUAI.getSummaryPrompt('paper_summary', 'methods')), '稍后使用的另一套方法提示词');
@@ -168,11 +170,53 @@ const dashboardHTML = '<!doctype html><meta charset="utf-8"><style>body{margin:0
     assert.equal(await frame.evaluate(() => modalOpens), 0);
     assert.equal(await frame.locator('#si-prompt-preset').inputValue(), 'critical');
     assert.equal(await frame.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-    const screenshot = process.env.SI_DASHBOARD_SCREENSHOT || path.join(os.tmpdir(), 'si-dashboard-presets.png');
+    await close(frame);
+
+    await page.evaluate(() => {
+      selected = [12, 14];
+      SIPaperAnnotation.create = async (item, prompt, config) => {
+        window.annotationRequest = { item: item.id, prompt, maxTokens: config.llmMaxTokens };
+        return { attachmentID: 311 };
+      };
+      Zotero.MinerUAI.openPaperAnnotation = async id => { window.openedAttachment = id; };
+    });
+    frame = await open();
+    await frame.locator('#si-summary-type').selectOption('paper_annotation');
+    assert.equal(await frame.getByRole('tabpanel').count(), 1);
+    assert.equal(await frame.locator('#si-annotation-course').count(), 0);
+    assert.match(await frame.locator('#si-summary-prompt').inputValue(), /逐段意译/);
+    assert.equal(await frame.locator('#si-summary').isDisabled(), true);
+    await frame.locator('#si-selection-list input').last().uncheck();
+    await frame.locator('#si-summary-prompt').fill('重点分析样本选择。');
+    await frame.locator('#si-prompt-save').click();
+    await frame.locator('#si-tab-analysis').press('End');
+    assert.equal(await frame.locator('#si-tab-settings').getAttribute('aria-selected'), 'true');
+    assert.equal(await frame.locator('#si-output-limit').inputValue(), '16384');
+    assert.equal(await frame.locator('#si-panel-analysis').isHidden(), true);
+    await frame.locator('#si-tab-tools').click();
+    assert.match(await frame.locator('#si-extract-selection').textContent(), /Modelling accumulation/);
+    await frame.locator('#si-tab-analysis').click();
+    assert.equal(await frame.locator('#si-summary-prompt').inputValue(), '重点分析样本选择。');
+    await close(frame);
+    frame = await open();
+    assert.equal(await frame.locator('#si-summary-prompt').inputValue(), '重点分析样本选择。');
+    await frame.locator('#si-prompt-reset').click();
+    assert.match(await frame.locator('#si-summary-prompt').inputValue(), /逐段意译/);
+    await frame.locator('#si-selection-list input').last().uncheck();
+    await frame.locator('#si-summary-prompt').fill('强调证据与结论的对应关系。');
+    await frame.locator('#si-summary').click();
+    await page.evaluate(() => Zotero.MinerUAI.dashboardRun);
+    await frame.locator('#si-summary-dialog-close').click();
+    await frame.locator('#si-prompt-reset').click();
+    const screenshot = process.env.SI_DASHBOARD_SCREENSHOT || path.join(os.tmpdir(), 'si-dashboard-tabs.png');
     fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-    await page.screenshot({ path: screenshot, fullPage: true });
+    await frame.locator('#mineru-dashboard-content').screenshot({ path: screenshot });
+    await frame.locator('#si-tab-tasks').click();
+    await frame.getByRole('button', { name: '在 Zotero 中打开 HTML' }).click();
+    assert.deepEqual(await page.evaluate(() => window.annotationRequest), { item: 12, prompt: '强调证据与结论的对应关系。', maxTokens: 16384 });
+    assert.equal(await page.evaluate(() => window.openedAttachment), 311);
     await close(frame);
     assert.deepEqual(errors, []);
-    console.log('dashboard browser passed: quiet completed/running replay, selection preservation, explicit details, independent presets/drafts/reset, persisted editor settings, busy controls and exact resume prompt');
+    console.log('dashboard browser passed: tabs, task replay/resume, presets/drafts, editable HTML prompt and attachment opening');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

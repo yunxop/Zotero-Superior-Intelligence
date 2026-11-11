@@ -54,6 +54,9 @@ jobs:
         import os
         from pathlib import Path
         version = json.loads(Path("plugin_src/manifest.json").read_text())["version"]
+        package_version = json.loads(Path("package.json").read_text())["version"]
+        if package_version != version:
+            raise SystemExit(f"package.json version {package_version} does not match manifest version {version}")
         if os.environ["GITHUB_EVENT_NAME"] == "release" and os.environ["RELEASE_TAG"] != f"v{version}":
             raise SystemExit(f"Release tag must match manifest version: v{version}")
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -71,3 +74,4 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: dist/zotero-superior-intelligence-${{ steps.package.outputs.version }}.xpi
+        fail_on_unmatched_files: true

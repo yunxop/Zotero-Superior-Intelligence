@@ -9,11 +9,11 @@
   <script src="chrome://zotero/content/customElements.js"/>
   <script src="chrome://zoteromineru/content/scripts/dashboard.js"/>
   <html:style>
-    #mineru-dashboard-content { box-sizing: border-box; padding: 28px; overflow-y: auto; background: #f6f8fb; color: #243247; font: 13px/1.65 system-ui, sans-serif; color-scheme: light; }
+    #mineru-dashboard-content { box-sizing: border-box; min-height: 0; flex: 1; padding: 0 24px 24px; overflow-y: auto; background: #f6f8fb; color: #243247; font: 13px/1.65 system-ui, sans-serif; color-scheme: light; }
     #mineru-dashboard-content * { box-sizing: border-box; }
-    .si-dashboard-header { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e0e6ee; }
-    .si-eyebrow { color: #3865a4; font-size: 10px; font-weight: 650; letter-spacing: .16em; margin-bottom: 6px; }
-    #mineru-dashboard-content h1 { font-size: 25px; font-weight: 650; letter-spacing: -.03em; margin: 0 0 6px; }
+    .si-dashboard-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 20px 0 14px; }
+    .si-workspace-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    #mineru-dashboard-content h1 { font-size: 23px; font-weight: 650; margin: 0; }
     #mineru-dashboard-content p { margin: 8px 0 14px; color: #627086; }
     .mineru-card { min-width: 0; border: 1px solid #e0e6ee; border-radius: 12px; padding: 22px; margin: 16px 0; background: #fff; box-shadow: 0 2px 5px #24324704; }
     .mineru-card > strong, .si-task-panel h2 { display: block; font-size: 15px; font-weight: 650; margin: 0 0 12px; }
@@ -26,10 +26,15 @@
     #mineru-dashboard-content #si-summary { background: #315f9f; border-color: #315f9f; color: #fff; padding: 8px 16px; font-weight: 600; }
     #mineru-dashboard-content #si-summary:hover { background: #254c83; }
     #mineru-dashboard-content :is(button, select, textarea):focus-visible { outline: 2px solid #3979ce; outline-offset: 3px; }
+    .si-dashboard-tabs { position: sticky; top: 0; z-index: 1; display: flex; align-items: stretch; gap: 4px; padding: 5px 4px 0; background: #f6f8fb; border-bottom: 1px solid #cfd8e4; overflow-x: auto; }
+    #mineru-dashboard-content .si-dashboard-tabs button { flex: none; border: 0; border-bottom: 3px solid transparent; border-radius: 7px 7px 0 0; padding: 9px clamp(9px, 2vw, 19px) 7px; background: transparent; }
+    #mineru-dashboard-content .si-dashboard-tabs button:hover { background: #eaf0f8; }
+    #mineru-dashboard-content .si-dashboard-tabs button[aria-selected="true"] { background: #e7effb; border-bottom-color: #315f9f; color: #254c83; font-weight: 650; }
+    #mineru-dashboard-content .si-dashboard-tabs button:focus-visible { outline-offset: -3px; }
     .mineru-prompt-controls select { padding: 7px 10px; min-width: 180px; max-width: 100%; }
     #si-prompt-preset-description { flex-basis: 100%; color: #627086; font-size: 12px; }
-    #si-prompt-preset-box[hidden], #si-job-status[hidden] { display: none; }
-    #si-job-status { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 12px 14px; border: 1px solid #dce6f2; border-radius: 8px; background: #f3f7fc; }
+    #mineru-dashboard-content [hidden] { display: none !important; }
+    #si-job-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; padding: 10px 12px; border: 1px solid #dce6f2; border-radius: 8px; background: #f3f7fc; }
     #si-job-message { flex: 1; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
     #si-job-details { flex-shrink: 0; }
     #si-job-status[data-status="completed"] { background: #f0f8f5; border-color: #cfe5dc; }
@@ -41,7 +46,7 @@
     #mineru-dashboard-result table { border-collapse: collapse; width: 100%; }
     #mineru-dashboard-result th, #mineru-dashboard-result td { border: 1px solid #dce4ed; padding: 8px; vertical-align: top; }
     #mineru-dashboard-result th { background: #f3f6fa; }
-    #mineru-dashboard-status { min-height: 22px; }
+    #mineru-dashboard-status:empty { display: none; }
     .si-task-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
     .si-task-stats div { border: 1px solid #e4eaf1; border-radius: 8px; padding: 12px 14px; background: #f8fafc; }
     .si-task-stats span { display: block; color: #627086; font-size: 11px; }
@@ -55,7 +60,7 @@
     .si-task-row strong { display: block; overflow-wrap: anywhere; font-size: 12px; }
     .si-task-row small { display: block; margin-top: 4px; color: #627086; font-size: 11px; }
     .si-task-empty { color: #627086; font-size: 12px; padding: 12px; background: #f8fafc; border-radius: 6px; }
-    @media (max-width: 600px) { #mineru-dashboard-content { padding: 16px; } .mineru-card { padding: 16px; } .si-task-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 600px) { #mineru-dashboard-content { padding: 0 14px 14px; } .mineru-card { padding: 14px; } .si-task-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } #si-job-message { flex-basis: 100%; } }
     #mineru-dashboard-content .si-task-link { display:block; max-width:100%; text-align:left; border:0; background:transparent; padding:0; min-height:28px; color:#315f9f; font-weight:600; overflow-wrap:anywhere; }
     .si-task-link:hover { text-decoration:underline; }
     .si-task-history summary { cursor:pointer; }
@@ -64,11 +69,11 @@
     #si-summary-dialog h2 { font-size:18px; margin:0 0 12px; }
     #si-summary-progress, #mineru-dashboard-status { white-space:pre-line; overflow-wrap:anywhere; }
     #si-highlight-legend { display:flex; flex-wrap:wrap; gap:8px 16px; margin:12px 0; font-size:12px; }
-    #si-highlight-legend[hidden] { display:none; }
     #si-highlight-legend span::before { content:""; display:inline-block; width:10px; height:10px; margin-right:6px; border-radius:3px; background:var(--mark); }
     .si-highlight-result { border-left:3px solid; padding:8px 12px; margin:12px 0; background:#f8fafc; }
     .si-highlight-result blockquote { margin:6px 0; white-space:pre-wrap; }
     #mineru-dashboard-result[data-mode="highlight"]:empty::before { content:"高亮完成后，这里将显示分类、页码和对应的 PDF 原文。"; }
+    #mineru-dashboard-result[data-mode="annotation"]:empty { display: none; }
     .si-selection-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     #si-selection-list { max-height:200px; overflow:auto; margin:12px 0; border:1px solid #e4eaf1; border-radius:8px; }
     .si-selection-row { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-bottom:1px solid #edf1f6; }
@@ -78,19 +83,31 @@
     .si-selection-row small { color:#627086; flex-shrink:0; }
     .si-selection-row[data-status="failed"] small { color:#ad413c; }
     .si-selection-row[data-status="completed"] small { color:#247563; }
-    :is(#si-batch-stop, #si-batch-resume)[hidden] { display:none; }
     .si-batch-result { margin:12px 0; border:1px solid #e4eaf1; border-radius:8px; padding:12px; }
     .si-batch-result summary { cursor:pointer; font-weight:600; overflow-wrap:anywhere; }
   </html:style>
   <html:main id="mineru-dashboard-content">
     <html:header class="si-dashboard-header">
-      <html:div class="si-eyebrow">SI / RESEARCH WORKSPACE</html:div>
       <html:h1>科研工作台</html:h1>
-    <html:p>选择文献或 PDF 附件后，在这里生成总结；阅读 PDF 时可通过右侧“SI 对话”直接提问。</html:p>
-    <html:div class="mineru-actions"><html:button id="si-library-chat" type="button">文献库对话</html:button><html:button id="si-writing-knowledge" type="button">科研写作知识库</html:button><html:span>基于摘要、笔记与注释，探索整个图书馆</html:span></html:div>
+      <html:div class="si-workspace-links">
+        <html:button id="si-library-chat" type="button">文献库对话 ↗</html:button>
+        <html:button id="si-writing-knowledge" type="button">科研写作知识库 ↗</html:button>
+      </html:div>
     </html:header>
-    <html:section class="mineru-card">
-      <html:strong>AI 文献控制面板</html:strong>
+    <html:div class="si-dashboard-tabs" role="tablist" aria-label="科研工作台">
+      <html:button id="si-tab-analysis" type="button" role="tab" aria-controls="si-panel-analysis" aria-selected="true">文献分析</html:button>
+      <html:button id="si-tab-tasks" type="button" role="tab" aria-controls="si-panel-tasks" aria-selected="false" tabindex="-1">文献任务</html:button>
+      <html:button id="si-tab-tools" type="button" role="tab" aria-controls="si-panel-tools" aria-selected="false" tabindex="-1">文档工具</html:button>
+      <html:button id="si-tab-settings" type="button" role="tab" aria-controls="si-panel-settings" aria-selected="false" tabindex="-1">连接配置</html:button>
+    </html:div>
+    <html:div id="si-job-status" hidden="hidden">
+      <html:span id="si-job-message" role="status" aria-live="polite"></html:span>
+      <html:button id="si-batch-stop" type="button" hidden="hidden">暂停任务</html:button>
+      <html:button id="si-open-annotation" type="button" hidden="hidden">在 Zotero 中打开 HTML</html:button>
+      <html:button id="si-job-details" type="button">查看任务详情</html:button>
+    </html:div>
+    <html:p id="mineru-dashboard-status" role="status"></html:p>
+    <html:section id="si-panel-analysis" class="mineru-card" role="tabpanel" aria-labelledby="si-tab-analysis">
       <html:p id="mineru-selected-item">正在读取所选条目…</html:p>
       <html:div class="si-selection-toolbar">
         <html:button id="si-selection-refresh" type="button">读取文献库当前选择</html:button>
@@ -98,11 +115,10 @@
         <html:button id="si-selection-none" type="button">取消全选</html:button>
         <html:span id="si-selection-count" role="status"></html:span>
       </html:div>
-      <html:p>在文献库按 Ctrl / Shift 多选后打开 SI；也可重新读取选择，再勾选本次处理的文献。批处理逐篇执行，同一 PDF 自动去重，每篇分别保存结果。</html:p>
       <html:div id="si-selection-list" aria-label="待处理文献"></html:div>
       <html:div class="mineru-prompt-controls">
-        <html:label for="si-summary-type">总结类型</html:label>
-        <html:select id="si-summary-type"><html:option value="paper_summary">文献总结</html:option><html:option value="table_summary">表格总结</html:option><html:option value="auto_highlight">文献高亮标记</html:option></html:select>
+        <html:label for="si-summary-type">分析类型</html:label>
+        <html:select id="si-summary-type"><html:option value="paper_summary">文献总结</html:option><html:option value="table_summary">表格总结</html:option><html:option value="auto_highlight">文献高亮标记</html:option><html:option value="paper_annotation">双栏批注 HTML</html:option></html:select>
         <html:button id="si-prompt-reset" type="button">恢复预设提示词</html:button>
         <html:button id="si-prompt-save" type="button">保存提示词</html:button>
       </html:div>
@@ -111,23 +127,18 @@
         <html:select id="si-prompt-preset" aria-describedby="si-prompt-preset-description"></html:select>
         <html:span id="si-prompt-preset-description"></html:span>
       </html:div>
-      <html:textarea id="si-summary-prompt" aria-label="总结提示词"></html:textarea>
+      <html:textarea id="si-summary-prompt" aria-label="分析提示词"></html:textarea>
       <html:p id="si-action-help">预设提示词要求中文学术表达；专业术语首次出现可附英文。生成的结果会自动保存为当前文献的子笔记。</html:p>
       <html:div id="si-highlight-legend" hidden="hidden" aria-label="高亮颜色分类">
         <html:span style="--mark:#ffd400">结论</html:span><html:span style="--mark:#2ea8e5">机制</html:span><html:span style="--mark:#5fb236">方法</html:span><html:span style="--mark:#ff6666">空白</html:span><html:span style="--mark:#a28ae5">可引用</html:span>
       </html:div>
       <html:div class="mineru-actions">
         <html:button id="si-summary" type="button">生成并保存到文献笔记</html:button>
-        <html:button id="si-batch-stop" type="button" hidden="hidden">暂停任务</html:button>
         <html:button id="si-batch-resume" type="button" hidden="hidden">继续批处理</html:button>
-      </html:div>
-      <html:div id="si-job-status" hidden="hidden">
-        <html:span id="si-job-message" role="status" aria-live="polite"></html:span>
-        <html:button id="si-job-details" type="button">查看任务详情</html:button>
       </html:div>
       <html:div id="mineru-dashboard-result" aria-live="polite"></html:div>
     </html:section>
-    <html:section class="mineru-card si-task-panel" aria-label="文献任务">
+    <html:section id="si-panel-tasks" class="mineru-card si-task-panel" role="tabpanel" aria-labelledby="si-tab-tasks" hidden="hidden">
       <html:h2>文献任务</html:h2>
       <html:p>查看总结与高亮进度、历史记录；未完成的任务会在关闭 Zotero 后标记为中断。</html:p>
       <html:div class="si-task-stats">
@@ -143,20 +154,18 @@
       <html:div id="si-task-history-list" class="si-task-list"></html:div>
       </html:details>
     </html:section>
-    <html:section class="mineru-card">
-      <html:strong>连接配置</html:strong>
+    <html:section id="si-panel-tools" class="mineru-card" role="tabpanel" aria-labelledby="si-tab-tools" hidden="hidden">
+      <html:p id="si-extract-selection"></html:p>
+      <html:div class="mineru-actions"><html:button id="mineru-dashboard-extract" type="button">提取 PDF 正文到笔记</html:button></html:div>
+    </html:section>
+    <html:section id="si-panel-settings" class="mineru-card" role="tabpanel" aria-labelledby="si-tab-settings" hidden="hidden">
       <html:p id="mineru-current-config"></html:p>
-      <html:div class="mineru-actions"><html:button id="si-thinking" type="button" aria-pressed="false">思考：关闭</html:button><html:label for="si-output-limit">本类任务输出上限</html:label><html:select id="si-output-limit"><html:option value="4096">4,096 Token</html:option><html:option value="8192" selected="selected">8,192 Token</html:option><html:option value="16384">16,384 Token</html:option><html:option value="32768">32,768 Token</html:option></html:select></html:div>
-      <html:p class="mineru-help">思考开关和各类任务输出上限自动保存，关闭界面后仍保留。思考开关适用于官方 DeepSeek 混合模型；其他模型遵循服务端设置。开启思考可能增加时间与用量。上限受模型支持范围约束；普通总结触及上限将保存“未完成”笔记，高亮 JSON 不完整时不写入。</html:p>
+      <html:div class="mineru-actions"><html:button id="si-thinking" type="button" aria-pressed="false">思考：关闭</html:button><html:label for="si-output-limit" id="si-output-label">所选分析类型的输出上限</html:label><html:select id="si-output-limit"><html:option value="4096">4,096 Token</html:option><html:option value="8192">8,192 Token</html:option><html:option value="16384" selected="selected">16,384 Token</html:option><html:option value="32768">32,768 Token</html:option></html:select></html:div>
+      <html:p class="mineru-help">思考开关和各类任务输出上限自动保存。思考开关适用于官方 DeepSeek 混合模型，其他模型遵循服务端设置。输出上限受所用模型支持范围约束。</html:p>
       <html:label for="si-dashboard-profile">本次使用的模型配置</html:label>
       <html:select id="si-dashboard-profile" style="display:block; width:100%; box-sizing:border-box; margin:8px 0; padding:7px;"></html:select>
       <html:button id="mineru-dashboard-preferences" type="button">打开 SI 设置</html:button>
     </html:section>
-    <html:section class="mineru-card">
-      <html:strong>文档工具</html:strong>
-      <html:div class="mineru-actions"><html:button id="mineru-dashboard-extract" type="button">提取 PDF 正文到笔记</html:button></html:div>
-    </html:section>
-    <html:p id="mineru-dashboard-status" role="status"></html:p>
     <html:dialog id="si-summary-dialog" aria-labelledby="si-summary-dialog-title">
       <html:h2 id="si-summary-dialog-title">正在生成总结</html:h2>
       <html:p id="si-summary-progress" role="status" aria-live="polite"></html:p>
